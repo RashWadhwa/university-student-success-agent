@@ -40,7 +40,7 @@ class Settings(BaseSettings):
         default="University Student Success Agent",
         validation_alias="APP_NAME",
     )
-    app_version: str = Field(default="0.4.0", validation_alias="APP_VERSION")
+    app_version: str = Field(default="0.5.0", validation_alias="APP_VERSION")
     environment: Environment = Field(
         default=Environment.DEVELOPMENT,
         validation_alias="ENVIRONMENT",
@@ -183,6 +183,54 @@ class Settings(BaseSettings):
         ge=1,
         le=65_535,
     )
+    ask_default_top_k: int = Field(
+        default=5,
+        validation_alias="ASK_DEFAULT_TOP_K",
+        ge=1,
+        le=100,
+    )
+    ask_max_top_k: int = Field(
+        default=10,
+        validation_alias="ASK_MAX_TOP_K",
+        ge=1,
+        le=100,
+    )
+    ask_min_evidence_count: int = Field(
+        default=1,
+        validation_alias="ASK_MIN_EVIDENCE_COUNT",
+        ge=1,
+        le=20,
+    )
+    ask_min_retrieval_score: float = Field(
+        default=0.5,
+        validation_alias="ASK_MIN_RETRIEVAL_SCORE",
+        ge=0.0,
+        le=1.0,
+    )
+    ask_max_evidence_chunks: int = Field(
+        default=5,
+        validation_alias="ASK_MAX_EVIDENCE_CHUNKS",
+        ge=1,
+        le=20,
+    )
+    ask_evidence_max_chars_per_chunk: int = Field(
+        default=2000,
+        validation_alias="ASK_EVIDENCE_MAX_CHARS_PER_CHUNK",
+        ge=200,
+        le=10_000,
+    )
+    ask_max_question_chars: int = Field(
+        default=2000,
+        validation_alias="ASK_MAX_QUESTION_CHARS",
+        ge=100,
+        le=10_000,
+    )
+    citation_excerpt_max_chars: int = Field(
+        default=400,
+        validation_alias="CITATION_EXCERPT_MAX_CHARS",
+        ge=80,
+        le=2000,
+    )
 
     @field_validator("log_level", mode="before")
     @classmethod
@@ -219,11 +267,15 @@ class Settings(BaseSettings):
         return value
 
     @model_validator(mode="after")
-    def validate_chunk_configuration(self) -> "Settings":
-        """Ensure overlap cannot prevent the chunker from making progress."""
+    def validate_cross_field_configuration(self) -> "Settings":
+        """Ensure chunking and ask limits form usable configurations."""
 
         if self.chunk_overlap >= self.chunk_size:
             raise ValueError("CHUNK_OVERLAP must be smaller than CHUNK_SIZE")
+        if self.ask_default_top_k > self.ask_max_top_k:
+            raise ValueError("ASK_DEFAULT_TOP_K must not exceed ASK_MAX_TOP_K")
+        if self.ask_min_evidence_count > self.ask_max_evidence_chunks:
+            raise ValueError("ASK_MIN_EVIDENCE_COUNT must not exceed ASK_MAX_EVIDENCE_CHUNKS")
         return self
 
     @property

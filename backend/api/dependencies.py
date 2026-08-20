@@ -2,6 +2,7 @@
 
 from fastapi import Request
 
+from backend.ask.service import AskService
 from backend.core.exceptions import ServiceNotReadyError
 from backend.documents.manager import DocumentManager
 from backend.llm.base import LLMProvider
@@ -41,4 +42,11 @@ def get_retrieval_service(request: Request) -> RetrievalService:
     service: RetrievalService | None = getattr(request.app.state, "retrieval_service", None)
     if service is None:
         raise ServiceNotReadyError(details={"failed_checks": ["retrieval_service"]})
+    return service
+
+
+def get_ask_service(request: Request) -> AskService:
+    service: AskService | None = getattr(request.app.state, "ask_service", None)
+    if service is None:
+        raise ServiceNotReadyError(details={"failed_checks": ["ask_service"]})
     return service

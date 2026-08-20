@@ -45,3 +45,7 @@ def configure_logging(log_level: str = "INFO") -> None:
 
     # Keep server access logging from duplicating our request-completion log.
     logging.getLogger("uvicorn.access").disabled = True
+    # Third-party debug logs can contain request or connection context. Application
+    # events provide the safe observability surface even when our own level is DEBUG.
+    for logger_name in ("openai", "httpx", "httpcore", "asyncpg", "sqlalchemy.engine"):
+        logging.getLogger(logger_name).setLevel(logging.WARNING)

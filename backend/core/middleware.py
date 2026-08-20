@@ -53,12 +53,13 @@ class RequestContextMiddleware:
 
         try:
             await self.app(scope, receive, send_with_request_id)
-        except Exception:
-            logger.exception(
+        except Exception as exc:
+            logger.error(
                 "Unhandled application exception",
                 extra={
                     "method": scope.get("method"),
                     "path": scope.get("path"),
+                    "error_type": type(exc).__name__,
                 },
             )
             response = JSONResponse(

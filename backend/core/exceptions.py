@@ -120,10 +120,13 @@ def register_exception_handlers(app: FastAPI) -> None:
         request: Request,
         exc: Exception,
     ) -> JSONResponse:
-        logger.exception(
+        logger.error(
             "Unhandled application exception",
-            extra={"method": request.method, "path": request.url.path},
-            exc_info=exc,
+            extra={
+                "method": request.method,
+                "path": request.url.path,
+                "error_type": type(exc).__name__,
+            },
         )
         return _error_response(
             status_code=500,

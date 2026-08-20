@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.api.router import service_router, v1_router
+from backend.ask.service import AskService
 from backend.core.config import Settings, get_settings
 from backend.core.exceptions import register_exception_handlers
 from backend.core.logging import configure_logging
@@ -51,6 +52,7 @@ def create_app(
         )
         app.state.indexing_service = None
         app.state.retrieval_service = None
+        app.state.ask_service = None
         app.state.document_manager = document_manager or DocumentManager(
             storage_path=resolved_settings.document_storage_path,
             max_file_size_bytes=resolved_settings.max_document_size_bytes,
@@ -83,6 +85,18 @@ def create_app(
                 provider=active_provider,
                 embedding_dimensions=resolved_settings.embedding_dimensions,
             )
+            app.state.ask_service = AskService(
+                retrieval=app.state.retrieval_service,
+                provider=active_provider,
+                default_top_k=resolved_settings.ask_default_top_k,
+                max_top_k=resolved_settings.ask_max_top_k,
+                minimum_evidence_count=resolved_settings.ask_min_evidence_count,
+                minimum_retrieval_score=resolved_settings.ask_min_retrieval_score,
+                maximum_evidence_chunks=resolved_settings.ask_max_evidence_chunks,
+                evidence_max_chars_per_chunk=(resolved_settings.ask_evidence_max_chars_per_chunk),
+                maximum_question_chars=resolved_settings.ask_max_question_chars,
+                citation_excerpt_max_chars=resolved_settings.citation_excerpt_max_chars,
+            )
             logger.info(
                 "LLM provider initialised",
                 extra={
@@ -110,6 +124,7 @@ def create_app(
             app.state.document_manager = None
             app.state.indexing_service = None
             app.state.retrieval_service = None
+            app.state.ask_service = None
             try:
                 if active_provider is not None:
                     await active_provider.close()
@@ -140,6 +155,7 @@ def create_app(
     app.state.database_manager = None
     app.state.indexing_service = None
     app.state.retrieval_service = None
+    app.state.ask_service = None
 
     if resolved_settings.cors_origins:
         app.add_middleware(

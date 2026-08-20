@@ -1,6 +1,7 @@
 """Tests for Stage 1 service endpoints and middleware."""
 
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -154,3 +155,28 @@ def test_unhandled_error_uses_error_envelope(
     body = response.json()
     assert body["error"]["code"] == "INTERNAL_SERVER_ERROR"
     assert body["request_id"] == response.headers["x-request-id"]
+
+
+def test_unhandled_error_does_not_log_or_return_sensitive_exception_message(
+    app: FastAPI,
+    client: TestClient,
+) -> None:
+    sensitive_marker = "student-private-data-must-not-leak"
+
+    @app.get("/_test/sensitive-error")
+    async def trigger_sensitive_error() -> None:
+        raise RuntimeError(sensitive_marker)
+
+    with (
+        patch("backend.core.exceptions.logger.error") as handler_log,
+        patch("backend.core.middleware.logger.error") as middleware_log,
+    ):
+        response = client.get("/_test/sensitive-error")
+
+    assert response.status_code == 500
+    assert sensitive_marker not in response.text
+    logged_calls = handler_log.call_args_list + middleware_log.call_args_list
+    assert len(logged_calls) == 1
+    logged = logged_calls[0]
+    assert sensitive_marker not in repr(logged)
+    assert logged.kwargs["extra"]["error_type"] == "RuntimeError"
