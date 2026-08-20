@@ -9,8 +9,9 @@ WORKDIR /app
 RUN addgroup --system appgroup \
     && adduser --system --ingroup appgroup appuser
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md alembic.ini ./
 COPY backend ./backend
+COPY migrations ./migrations
 
 RUN python -m pip install --upgrade pip \
     && python -m pip install . \

@@ -35,6 +35,7 @@ class DocumentResponse(StrictModel):
 
     id: str
     original_filename: str
+    safe_filename: str
     stored_filename: str
     media_type: Literal["application/pdf"]
     size_bytes: int = Field(gt=0)

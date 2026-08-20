@@ -40,7 +40,7 @@ class Settings(BaseSettings):
         default="University Student Success Agent",
         validation_alias="APP_NAME",
     )
-    app_version: str = Field(default="0.3.0", validation_alias="APP_VERSION")
+    app_version: str = Field(default="0.4.0", validation_alias="APP_VERSION")
     environment: Environment = Field(
         default=Environment.DEVELOPMENT,
         validation_alias="ENVIRONMENT",
@@ -139,6 +139,49 @@ class Settings(BaseSettings):
         validation_alias="CHUNK_OVERLAP",
         ge=0,
         le=20_000,
+    )
+    database_url: SecretStr = Field(
+        default=SecretStr(
+            "postgresql+asyncpg://student_success:student_success@localhost:5432/student_success"
+        ),
+        validation_alias="DATABASE_URL",
+        min_length=1,
+    )
+    database_pool_size: int = Field(
+        default=5,
+        validation_alias="DATABASE_POOL_SIZE",
+        ge=1,
+        le=50,
+    )
+    database_max_overflow: int = Field(
+        default=10,
+        validation_alias="DATABASE_MAX_OVERFLOW",
+        ge=0,
+        le=100,
+    )
+    database_pool_timeout: float = Field(
+        default=30.0,
+        validation_alias="DATABASE_POOL_TIMEOUT",
+        gt=0,
+        le=300,
+    )
+    database_readiness_timeout: float = Field(
+        default=3.0,
+        validation_alias="DATABASE_READINESS_TIMEOUT",
+        gt=0,
+        le=30,
+    )
+    embedding_batch_size: int = Field(
+        default=32,
+        validation_alias="EMBEDDING_BATCH_SIZE",
+        ge=1,
+        le=2048,
+    )
+    embedding_dimensions: int = Field(
+        default=1536,
+        validation_alias="EMBEDDING_DIMENSIONS",
+        ge=1,
+        le=65_535,
     )
 
     @field_validator("log_level", mode="before")

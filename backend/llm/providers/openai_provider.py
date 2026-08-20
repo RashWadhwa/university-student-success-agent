@@ -169,6 +169,7 @@ class OpenAIProvider(LLMProvider):
             "model": self.embedding_model,
             "input": texts,
             "encoding_format": "float",
+            "dimensions": self._settings.embedding_dimensions,
         }
         extra_headers = self._request_headers()
         if extra_headers:
@@ -218,8 +219,7 @@ class OpenAIProvider(LLMProvider):
             "instructions": system_prompt,
             "input": user_prompt,
             "store": False,
-            "max_output_tokens": options.max_output_tokens
-            or self._settings.llm_max_output_tokens,
+            "max_output_tokens": options.max_output_tokens or self._settings.llm_max_output_tokens,
         }
         if options.temperature is not None:
             parameters["temperature"] = options.temperature
@@ -234,9 +234,7 @@ class OpenAIProvider(LLMProvider):
         if usage is None:
             return TokenUsage()
         input_tokens = int(
-            getattr(usage, "input_tokens", None)
-            or getattr(usage, "prompt_tokens", 0)
-            or 0
+            getattr(usage, "input_tokens", None) or getattr(usage, "prompt_tokens", 0) or 0
         )
         output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
         total_tokens = int(getattr(usage, "total_tokens", input_tokens + output_tokens) or 0)

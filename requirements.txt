@@ -3,6 +3,7 @@ pydantic
 pydantic-settings
 openai
 sqlalchemy
+asyncpg
 pgvector
 redis
 alembic

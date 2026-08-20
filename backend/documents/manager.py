@@ -54,7 +54,8 @@ class DocumentManager:
         )
 
     async def ingest(self, upload: AsyncUpload) -> DocumentRecord:
-        safe_filename = self.secure_filename(upload.filename)
+        original_filename = self.validated_original_filename(upload.filename)
+        safe_filename = self.secure_filename(original_filename)
         self._validate_media_type(upload.content_type)
         content = await upload.read(self.max_file_size_bytes + 1)
         if not content:
@@ -70,9 +71,24 @@ class DocumentManager:
                 details={"max_size_bytes": self.max_file_size_bytes},
             )
 
-        return await asyncio.to_thread(self._ingest_content, safe_filename, content)
+        return await asyncio.to_thread(
+            self._ingest_content,
+            original_filename,
+            safe_filename,
+            content,
+        )
 
-    def _ingest_content(self, safe_filename: str, content: bytes) -> DocumentRecord:
+    def get_document(self, document_id: str) -> DocumentRecord | None:
+        """Return a previously ingested record for an explicit indexing request."""
+
+        return self.repository.find_by_id(document_id)
+
+    def _ingest_content(
+        self,
+        original_filename: str,
+        safe_filename: str,
+        content: bytes,
+    ) -> DocumentRecord:
         """Perform CPU-bound parsing and durable writes outside the event loop."""
 
         checksum = hashlib.sha256(content).hexdigest()
@@ -81,18 +97,35 @@ class DocumentManager:
             raise DuplicateDocumentError(checksum=checksum, document_id=existing.id)
 
         extraction = self.pdf_processor.extract(content)
+        document_id = str(uuid4())
+        for page in extraction.pages:
+            page.metadata.update(
+                {
+                    "document_id": document_id,
+                    "checksum_sha256": checksum,
+                    "source_filename": safe_filename,
+                }
+            )
         chunks = self.chunker.chunk(extraction.pages)
         if not chunks:
             raise InvalidDocumentError(
                 code="PDF_IMAGE_ONLY",
                 message="The PDF contains no extractable text; image-only PDFs are not supported.",
             )
+        for chunk in chunks:
+            chunk.metadata.update(
+                {
+                    "document_id": document_id,
+                    "checksum_sha256": checksum,
+                    "source_filename": safe_filename,
+                }
+            )
 
-        document_id = str(uuid4())
         stored_filename = f"{checksum}.pdf"
         record = DocumentRecord(
             id=document_id,
-            original_filename=safe_filename,
+            original_filename=original_filename,
+            safe_filename=safe_filename,
             stored_filename=stored_filename,
             media_type="application/pdf",
             size_bytes=len(content),
@@ -118,7 +151,7 @@ class DocumentManager:
         return record
 
     @staticmethod
-    def secure_filename(filename: str | None) -> str:
+    def validated_original_filename(filename: str | None) -> str:
         if not filename or not filename.strip():
             raise InvalidDocumentError(
                 code="DOCUMENT_FILENAME_INVALID",
@@ -136,6 +169,11 @@ class DocumentManager:
                 code="DOCUMENT_TYPE_INVALID",
                 message="Only PDF uploads are supported.",
             )
+        return normalised
+
+    @staticmethod
+    def secure_filename(filename: str | None) -> str:
+        normalised = DocumentManager.validated_original_filename(filename)
         stem = _SAFE_FILENAME_CHARS.sub("_", Path(normalised).stem).strip("._-")
         if not stem:
             stem = "document"

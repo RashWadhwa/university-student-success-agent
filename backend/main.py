@@ -13,10 +13,13 @@ from backend.core.config import Settings, get_settings
 from backend.core.exceptions import register_exception_handlers
 from backend.core.logging import configure_logging
 from backend.core.middleware import RequestContextMiddleware
+from backend.database.manager import DatabaseManager
 from backend.documents.manager import DocumentManager
 from backend.llm.base import LLMProvider
 from backend.llm.errors import LLMConfigurationError
 from backend.llm.factory import create_llm_provider
+from backend.rag.indexing import IndexingService
+from backend.rag.retrieval import RetrievalService
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +29,7 @@ def create_app(
     *,
     llm_provider: LLMProvider | None = None,
     document_manager: DocumentManager | None = None,
+    database_manager: DatabaseManager | None = None,
 ) -> FastAPI:
     """Create and configure a FastAPI application instance."""
 
@@ -38,6 +42,15 @@ def create_app(
         app.state.started_at = datetime.now(UTC)
         app.state.llm_provider = None
         app.state.llm_provider_error = None
+        app.state.database_manager = database_manager or DatabaseManager(
+            resolved_settings.database_url.get_secret_value(),
+            pool_size=resolved_settings.database_pool_size,
+            max_overflow=resolved_settings.database_max_overflow,
+            pool_timeout=resolved_settings.database_pool_timeout,
+            readiness_timeout=resolved_settings.database_readiness_timeout,
+        )
+        app.state.indexing_service = None
+        app.state.retrieval_service = None
         app.state.document_manager = document_manager or DocumentManager(
             storage_path=resolved_settings.document_storage_path,
             max_file_size_bytes=resolved_settings.max_document_size_bytes,
@@ -59,6 +72,17 @@ def create_app(
         try:
             active_provider = llm_provider or create_llm_provider(resolved_settings)
             app.state.llm_provider = active_provider
+            app.state.indexing_service = IndexingService(
+                database=app.state.database_manager,
+                provider=active_provider,
+                embedding_batch_size=resolved_settings.embedding_batch_size,
+                embedding_dimensions=resolved_settings.embedding_dimensions,
+            )
+            app.state.retrieval_service = RetrievalService(
+                database=app.state.database_manager,
+                provider=active_provider,
+                embedding_dimensions=resolved_settings.embedding_dimensions,
+            )
             logger.info(
                 "LLM provider initialised",
                 extra={
@@ -84,8 +108,14 @@ def create_app(
         finally:
             app.state.ready = False
             app.state.document_manager = None
-            if active_provider is not None:
-                await active_provider.close()
+            app.state.indexing_service = None
+            app.state.retrieval_service = None
+            try:
+                if active_provider is not None:
+                    await active_provider.close()
+            finally:
+                await app.state.database_manager.close()
+                app.state.database_manager = None
             logger.info("Application stopped")
 
     app = FastAPI(
@@ -107,6 +137,9 @@ def create_app(
     app.state.llm_provider = None
     app.state.llm_provider_error = None
     app.state.document_manager = None
+    app.state.database_manager = None
+    app.state.indexing_service = None
+    app.state.retrieval_service = None
 
     if resolved_settings.cors_origins:
         app.add_middleware(

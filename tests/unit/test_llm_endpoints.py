@@ -1,10 +1,13 @@
 """Tests for Stage 2 provider diagnostic endpoints."""
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend.core.config import Environment, LLMProviderName, Settings
 from backend.main import create_app
+from tests.conftest import ReadyDatabaseManager
 
 
 def test_llm_status_reports_mock_provider(client: TestClient) -> None:
@@ -34,15 +37,16 @@ def test_llm_smoke_test_returns_structured_result(client: TestClient) -> None:
     assert body["usage"]["total_tokens"] == 0
 
 
-def test_missing_openai_key_keeps_liveness_but_fails_readiness() -> None:
+def test_missing_openai_key_keeps_liveness_but_fails_readiness(tmp_path: Path) -> None:
     settings = Settings(
         _env_file=None,
         environment=Environment.TESTING,
         llm_provider=LLMProviderName.OPENAI,
         openai_api_key=None,
         cors_origins=[],
+        document_storage_path=tmp_path / "documents",
     )
-    app: FastAPI = create_app(settings)
+    app: FastAPI = create_app(settings, database_manager=ReadyDatabaseManager())
 
     with TestClient(app) as client:
         assert client.get("/health").status_code == 200
@@ -51,23 +55,22 @@ def test_missing_openai_key_keeps_liveness_but_fails_readiness() -> None:
         smoke = client.post("/api/v1/llm/smoke-test")
 
     assert ready.status_code == 503
-    assert ready.json()["error"]["details"] == {
-        "failed_checks": ["llm_provider"]
-    }
+    assert ready.json()["error"]["details"] == {"failed_checks": ["llm_provider"]}
     assert status.json()["configured"] is False
     assert smoke.status_code == 503
     assert smoke.json()["error"]["code"] == "LLM_CONFIGURATION_ERROR"
 
 
-def test_smoke_test_is_disabled_in_production() -> None:
+def test_smoke_test_is_disabled_in_production(tmp_path: Path) -> None:
     settings = Settings(
         _env_file=None,
         environment=Environment.PRODUCTION,
         llm_provider=LLMProviderName.MOCK,
         enable_llm_smoke_test=True,
         cors_origins=[],
+        document_storage_path=tmp_path / "documents",
     )
-    app = create_app(settings)
+    app = create_app(settings, database_manager=ReadyDatabaseManager())
 
     with TestClient(app) as client:
         response = client.post("/api/v1/llm/smoke-test")

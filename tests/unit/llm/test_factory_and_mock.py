@@ -15,9 +15,7 @@ class StructuredExample(BaseModel):
 
 @pytest.mark.asyncio
 async def test_mock_provider_uses_configured_structured_payload() -> None:
-    provider = MockLLMProvider(
-        structured_responses={StructuredExample: {"value": "deterministic"}}
-    )
+    provider = MockLLMProvider(structured_responses={StructuredExample: {"value": "deterministic"}})
 
     result = await provider.generate_structured(
         system_prompt="system",

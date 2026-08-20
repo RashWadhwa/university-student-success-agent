@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class DocumentModel(BaseModel):
@@ -39,6 +39,7 @@ class DocumentRecord(DocumentModel):
 
     id: str
     original_filename: str
+    safe_filename: str | None = None
     stored_filename: str
     media_type: str
     size_bytes: int = Field(gt=0)
@@ -49,3 +50,11 @@ class DocumentRecord(DocumentModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     pages: list[PageRecord]
     chunks: list[ChunkRecord]
+
+    @model_validator(mode="after")
+    def default_safe_filename(self) -> "DocumentRecord":
+        """Load Stage 3 sidecars written before the explicit safe-name field."""
+
+        if self.safe_filename is None:
+            self.safe_filename = self.original_filename
+        return self

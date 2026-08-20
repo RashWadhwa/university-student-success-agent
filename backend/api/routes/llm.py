@@ -1,5 +1,7 @@
 """Provider status and development-only smoke-test endpoints."""
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Request
 
 from backend.api.dependencies import get_llm_provider
@@ -24,9 +26,7 @@ async def llm_status(request: Request) -> LLMStatusResponse:
     return LLMStatusResponse(
         provider=settings.llm_provider.value,
         model=provider.model if provider else settings.openai_model,
-        embedding_model=(
-            provider.embedding_model if provider else settings.openai_embedding_model
-        ),
+        embedding_model=(provider.embedding_model if provider else settings.openai_embedding_model),
         configured=provider is not None and provider.is_configured,
         smoke_test_enabled=settings.llm_smoke_test_enabled,
         configuration_error=error,
@@ -40,7 +40,7 @@ async def llm_status(request: Request) -> LLMStatusResponse:
 )
 async def llm_smoke_test(
     request: Request,
-    provider: LLMProvider = Depends(get_llm_provider),
+    provider: Annotated[LLMProvider, Depends(get_llm_provider)],
 ) -> LLMSmokeTestResponse:
     settings: Settings = request.app.state.settings
     if not settings.llm_smoke_test_enabled:

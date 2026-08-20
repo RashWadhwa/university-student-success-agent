@@ -40,11 +40,14 @@ async def test_ingestion_hashes_chunks_and_persists_metadata(tmp_path: Path) -> 
         UploadStub(content=content, filename="Student Handbook (2026).PDF")
     )
 
-    assert record.original_filename == "Student_Handbook_2026.pdf"
+    assert record.original_filename == "Student Handbook (2026).PDF"
+    assert record.safe_filename == "Student_Handbook_2026.pdf"
     assert record.stored_filename == f"{record.checksum_sha256}.pdf"
     assert record.page_count == 1
     assert record.chunk_count > 1
     assert record.pages[0].page_number == 1
+    assert record.pages[0].metadata["document_id"] == record.id
+    assert record.chunks[0].metadata["checksum_sha256"] == record.checksum_sha256
     assert record.metadata["/Title"] == "Academic Handbook"
     assert (tmp_path / record.stored_filename).read_bytes() == content
     assert (tmp_path / f"{record.id}.json").is_file()

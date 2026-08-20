@@ -144,6 +144,7 @@ async def test_embeddings_preserve_input_order(settings: Settings) -> None:
         "model": "embedding-test",
         "input": ["first", "second"],
         "encoding_format": "float",
+        "dimensions": 1536,
     }
 
 

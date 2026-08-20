@@ -6,6 +6,8 @@ from backend.core.exceptions import ServiceNotReadyError
 from backend.documents.manager import DocumentManager
 from backend.llm.base import LLMProvider
 from backend.llm.errors import LLMConfigurationError
+from backend.rag.indexing import IndexingService
+from backend.rag.retrieval import RetrievalService
 
 
 def get_llm_provider(request: Request) -> LLMProvider:
@@ -26,3 +28,17 @@ def get_document_manager(request: Request) -> DocumentManager:
     if manager is None:
         raise ServiceNotReadyError(details={"failed_checks": ["document_manager"]})
     return manager
+
+
+def get_indexing_service(request: Request) -> IndexingService:
+    service: IndexingService | None = getattr(request.app.state, "indexing_service", None)
+    if service is None:
+        raise ServiceNotReadyError(details={"failed_checks": ["indexing_service"]})
+    return service
+
+
+def get_retrieval_service(request: Request) -> RetrievalService:
+    service: RetrievalService | None = getattr(request.app.state, "retrieval_service", None)
+    if service is None:
+        raise ServiceNotReadyError(details={"failed_checks": ["retrieval_service"]})
+    return service

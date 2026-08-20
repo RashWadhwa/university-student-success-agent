@@ -11,7 +11,7 @@ def create_llm_provider(settings: Settings) -> LLMProvider:
     """Create the configured provider without exposing provider details to callers."""
 
     if settings.llm_provider is LLMProviderName.MOCK:
-        return MockLLMProvider()
+        return MockLLMProvider(embedding_dimensions=settings.embedding_dimensions)
     if settings.llm_provider is LLMProviderName.OPENAI:
         return OpenAIProvider(settings)
     raise LLMConfigurationError(details={"provider": str(settings.llm_provider)})

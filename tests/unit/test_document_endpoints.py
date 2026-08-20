@@ -19,7 +19,8 @@ def test_upload_pdf_returns_typed_document_metadata(client: TestClient) -> None:
     assert response.status_code == 201
     body = response.json()
     assert body["status"] == "ingested"
-    assert body["document"]["original_filename"] == "assessment_policy.pdf"
+    assert body["document"]["original_filename"] == "assessment policy.pdf"
+    assert body["document"]["safe_filename"] == "assessment_policy.pdf"
     assert body["document"]["page_count"] == 1
     assert body["document"]["metadata"]["/Title"] == "Assessment Policy"
     assert body["document"]["pages"][0]["page_number"] == 1

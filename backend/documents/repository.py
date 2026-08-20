@@ -22,11 +22,16 @@ class FileSystemDocumentRepository:
         self.root.mkdir(parents=True, exist_ok=True)
         self._lock = RLock()
         self._by_checksum: dict[str, DocumentRecord] = {}
+        self._by_id: dict[str, DocumentRecord] = {}
         self._load_existing()
 
     def find_by_checksum(self, checksum: str) -> DocumentRecord | None:
         with self._lock:
             return self._by_checksum.get(checksum)
+
+    def find_by_id(self, document_id: str) -> DocumentRecord | None:
+        with self._lock:
+            return self._by_id.get(document_id)
 
     def save(self, record: DocumentRecord, content: bytes) -> None:
         with self._lock:
@@ -49,12 +54,14 @@ class FileSystemDocumentRepository:
                 pdf_path.unlink(missing_ok=True)
                 raise
             self._by_checksum[record.checksum_sha256] = record
+            self._by_id[record.id] = record
 
     def _load_existing(self) -> None:
         for path in self.root.glob("*.json"):
             try:
                 record = DocumentRecord.model_validate_json(path.read_text(encoding="utf-8"))
                 self._by_checksum[record.checksum_sha256] = record
+                self._by_id[record.id] = record
             except Exception as exc:
                 logger.warning(
                     "Ignoring invalid document metadata sidecar",

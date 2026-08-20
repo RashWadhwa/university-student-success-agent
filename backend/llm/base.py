@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Generic, TypeVar
+from typing import TypeVar
 
 from pydantic import BaseModel
 
@@ -27,10 +27,10 @@ class TokenUsage:
 
 
 @dataclass(frozen=True, slots=True)
-class LLMResult(Generic[StructuredOutputT]):
+class LLMResult[OutputT: BaseModel]:
     """Normalised model result with metadata required for traces and evals."""
 
-    output: StructuredOutputT
+    output: OutputT
     provider: str
     model: str
     latency_ms: float
