@@ -1,7 +1,7 @@
 # University Student Success Agent
 
-Stage 5 adds a controlled, grounded question-answering workflow to the existing
-FastAPI, provider, PDF-ingestion, and PostgreSQL/pgvector layers. Students can ask
+Stage 6 adds controlled, permissioned multi-agent orchestration alongside the existing
+Stage 5 single-workflow baseline. Students can ask
 about assessment problems, missed deadlines, extensions, mitigating circumstances,
 reassessment, and academic appeals. Policy guidance is generated only from retrieved
 university evidence and is returned with verified page-level citations.
@@ -41,6 +41,23 @@ LLMProvider.generate_structured -> citation/claim verification
         |                         -> deterministic confidence/escalation
         v
 typed grounded response or safe fallback
+
+POST /api/v1/ask/agentic
+        |
+        v
+deterministic Coordinator -> typed bounded plan
+        | simple                         | multi-part
+        v                                v
+Stage 5 AskService              Retrieval Specialist -> authorised READ tool
+                                         |
+                                         v
+                                Policy Analyst -> deterministic verification
+                                         |
+                                         v
+                                Student Support -> final verifier
+                                         |
+                                         v
+                                Stage 5-compatible response + safe metrics
 ```
 
 The code uses ordinary PostgreSQL through SQLAlchemy. Local Docker PostgreSQL and
@@ -82,7 +99,36 @@ LangChain, external vector database, or search cluster.
 - explicit human escalation and typed fallbacks for unsupported, insufficient,
   unverified, and temporarily unavailable outcomes
 - bounded citation excerpts and safe evaluation metadata
-- no durable session memory and no multi-agent orchestration
+- no durable session memory; this remains the measurable single-workflow baseline
+
+## Stage 6 capabilities
+
+- separate `POST /api/v1/ask/agentic` path; `POST /api/v1/ask` is unchanged
+- deterministic coordinator that delegates single-intent questions to Stage 5 and
+  uses specialists only for multi-intent questions
+- fixed registry for Coordinator, Retrieval Specialist, Policy Analyst, Student
+  Support Specialist, and Verifier—user input cannot construct or rename agents
+- explicit, acyclic state transitions with per-agent timeouts, bounded retries,
+  task limits, tool-call limits, and evidence limits
+- typed Pydantic contracts at coordinator, specialist, verifier, and tool boundaries
+- retrieval reuse through `RetrievalService`; no specialist performs direct SQL
+- deterministic citation, deadline, approval, prompt-leakage, and tool-result checks
+- application-enforced `READ` and `PREPARE` tools; `EXECUTE` is disabled in Stage 6
+- safe comparison metadata for later baseline-vs-agentic evaluation
+- request-scoped state/audit events only; no conversation, question, agent message,
+  student record, or workflow trace is persisted
+
+The specialist roles are deliberately narrow:
+
+| Agent | Input | Responsibility | User-facing text |
+|---|---|---|---|
+| Coordinator | bounded question, filters, `top_k` | scope, intent, fixed plan | no |
+| Retrieval | query and typed filters | return bounded citation-ready evidence | no |
+| Policy Analyst | objective and bounded evidence | cited rules, deadlines, evidence requirements, exceptions, conflicts, uncertainties | no |
+| Student Support | intent label and verified structured findings | prioritised policy/practical actions | yes |
+| Verifier | final typed artifacts and evidence references | fail-closed deterministic validation | no |
+
+There is no recursive planning, dynamic agent spawning, or open-ended agent chat.
 
 ## Why indexing is a separate step
 
@@ -150,6 +196,11 @@ API. PostgreSQL data persists in the named `student-success-postgres` volume.
 | `ASK_EVIDENCE_MAX_CHARS_PER_CHUNK` | `2000` | per-passage prompt bound |
 | `ASK_MAX_QUESTION_CHARS` | `2000` | application-level question limit |
 | `CITATION_EXCERPT_MAX_CHARS` | `400` | maximum returned excerpt length |
+| `AGENT_MAX_TASKS` | `4` | maximum coordinator tasks |
+| `AGENT_MAX_TOOL_CALLS` | `4` | maximum authorised tool calls per request |
+| `AGENT_TIMEOUT_SECONDS` | `20` | timeout for each specialist attempt |
+| `AGENT_MAX_RETRIES` | `1` | bounded specialist retries |
+| `AGENT_MAX_EVIDENCE_ITEMS` | `5` | maximum evidence items shared with specialists |
 
 `text-embedding-3-small` normally uses 1536 dimensions in this project. If the
 configured provider/model emits a different size, set `EMBEDDING_DIMENSIONS` to the
@@ -366,6 +417,116 @@ use the existing structured error envelope.
   Stage 5 creates no conversation, question, answer, or student-profile persistence.
   Existing document/index persistence remains unchanged.
 
+## Agentic ask API
+
+Use the agentic endpoint explicitly for multi-part questions. The request schema is
+the same strict, bounded schema as the baseline:
+
+```http
+POST /api/v1/ask/agentic
+Content-Type: application/json
+X-Request-ID: student-request-123
+```
+
+```json
+{
+  "question": "I missed an assessment due to illness. How do mitigating circumstances and an academic appeal apply?",
+  "top_k": 5,
+  "filters": {
+    "document_type": "academic_policy"
+  }
+}
+```
+
+The normal Stage 5-compatible response fields are followed by safe workflow metadata:
+
+```json
+{
+  "outcome": "answered",
+  "answer": "Review the mitigating-circumstances and appeal procedures.",
+  "recommended_actions": [],
+  "citations": [
+    {
+      "citation_id": "E1",
+      "document_id": "document-id",
+      "chunk_id": "chunk-id",
+      "document_title": "Assessment Policy",
+      "section": "Appeals",
+      "page": 3,
+      "source": "https://example.edu/assessment-policy",
+      "excerpt": "Academic appeals must be submitted within the published period.",
+      "version": "3.0",
+      "effective_date": "2025-09-01",
+      "retrieval_sources": ["semantic", "keyword"]
+    }
+  ],
+  "confidence": "medium",
+  "limitations": [],
+  "requires_human_support": false,
+  "human_support_reason": null,
+  "request_id": "student-request-123",
+  "evaluation": {
+    "retrieved_count": 1,
+    "evidence_count": 1,
+    "retrieval_strength": 0.9,
+    "citation_count": 1,
+    "citation_verification_passed": true
+  },
+  "workflow": {
+    "workflow_mode": "agentic",
+    "agents_used": ["coordinator", "retrieval", "policy_analyst", "student_support", "verifier"],
+    "tool_calls": 1,
+    "retrieval_count": 1,
+    "citation_count": 1,
+    "confidence": "medium",
+    "requires_human_support": false,
+    "duration_ms": 25.4,
+    "provider_calls": 3,
+    "verification_passed": true
+  }
+}
+```
+
+For a supported single-intent question, this endpoint returns
+`workflow_mode: "baseline_delegated"` and calls the existing `AskService`. This avoids
+unnecessary specialists while keeping the endpoint choice explicit. The original
+`POST /api/v1/ask` never invokes Stage 6.
+
+### Tools and permissions
+
+| Tool | Permission | Authorised agent | Effect |
+|---|---|---|---|
+| `search_knowledge_base` | `READ` | Retrieval | existing bounded hybrid retrieval |
+| `get_document_section` | `READ` | Retrieval, Policy Analyst | request-scoped retrieved section only |
+| `find_student_service` | `READ` | Student Support | static generic service guidance |
+| `draft_support_email` | `PREPARE` | Student Support | creates a bounded draft; sends nothing |
+
+Application code validates the agent, tool, exact permission, request context, call
+limit, and typed arguments before running a handler. No `EXECUTE` tool exists, and an
+LLM cannot grant itself capabilities. Tool inputs accept no SQL, filter expression,
+filesystem path, or arbitrary agent/tool name.
+
+### Agentic security and audit boundaries
+
+- Policy evidence and structured tool output are explicitly delimited as untrusted
+  data. Instructions to change role, ignore the coordinator, invoke unauthorised
+  tools, reveal prompts, approve an appeal, or exfiltrate documents are ignored by
+  prompts and rejected if they enter output.
+- The Policy Analyst receives only a narrow objective and bounded evidence. Student
+  Support receives an intent label and verified structured findings—not the raw
+  question, document bodies, filters, database state, or prompts.
+- Every specialist output is validated before entering shared request state. Support
+  citations must be within the analyst's verified citation set; the final verifier
+  cannot be bypassed.
+- Audit events contain only request ID, fixed agent/tool names, permission, decision,
+  duration, success, and failure category. Questions, prompts, evidence text, model
+  responses, PII, secrets, credentials, and exception messages are excluded.
+- No debug endpoint is exposed. API errors and safe fallbacks contain no stack traces,
+  database/provider internals, raw exceptions, prompts, or chain-of-thought.
+- Coordinator, retrieval, provider, timeout, schema, tool, conflict, and verification
+  failures fail closed to typed escalation responses. Unverified model text is never
+  returned.
+
 ## Health and readiness
 
 - `GET /health` is process liveness only. It never checks PostgreSQL, Supabase,
@@ -440,7 +601,7 @@ alembic upgrade head
 pytest -m integration -q
 ```
 
-## Current limitations and Stage 6
+## Current limitations and Stage 7 readiness
 
 - image-only PDFs still require a future OCR pipeline;
 - exact vector search is intended for the initial corpus, not millions of chunks;
@@ -451,9 +612,11 @@ pytest -m integration -q
 - no application or appeal is submitted, approved, or automatically escalated;
 - the workflow does not diagnose conditions or provide legal advice.
 
-Stage 6 can preserve this `AskService` as the measurable single-workflow baseline
-while introducing coordinator, policy, support, and verifier roles behind a separate
-orchestration boundary. Both approaches can share the same retrieval evidence,
-citation verifier, response contract, confidence signals, and evaluation hooks, so
-latency, correctness, grounding, citation quality, and escalation behavior can be
-compared directly.
+Stage 7 can put Streamlit over both explicit endpoints and use the returned workflow
+metadata for side-by-side latency, call-count, citation, confidence, and escalation
+views. Langfuse tracing can attach request IDs and the safe audit fields without
+recording prompts, evidence bodies, or student data. A deterministic eval suite can
+compare the two paths first; an optional LLM-as-judge can then score bounded,
+redacted outputs. The stable response contract and `workflow` metrics support trace
+comparison and baseline-vs-agentic benchmarking without changing either Stage 5 or
+Stage 6 execution semantics.

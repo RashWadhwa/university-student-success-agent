@@ -2,6 +2,7 @@
 
 from fastapi import Request
 
+from backend.agents.service import AgenticAskService
 from backend.ask.service import AskService
 from backend.core.exceptions import ServiceNotReadyError
 from backend.documents.manager import DocumentManager
@@ -49,4 +50,13 @@ def get_ask_service(request: Request) -> AskService:
     service: AskService | None = getattr(request.app.state, "ask_service", None)
     if service is None:
         raise ServiceNotReadyError(details={"failed_checks": ["ask_service"]})
+    return service
+
+
+def get_agentic_ask_service(request: Request) -> AgenticAskService:
+    """Return the bounded Stage 6 orchestration service."""
+
+    service: AgenticAskService | None = getattr(request.app.state, "agentic_ask_service", None)
+    if service is None:
+        raise ServiceNotReadyError(details={"failed_checks": ["agentic_ask_service"]})
     return service

@@ -5,7 +5,7 @@ import re
 from backend.ask.types import ScopeAssessment
 
 _SUPPORTED = re.compile(
-    r"\b(assessment|coursework|submission|deadline|extension|mitigating\s+"
+    r"\b(assessment|coursework|submission|deadline|extensions?|mitigating\s+"
     r"circumstances?|extenuating\s+circumstances?|reassessment|resit|retake|"
     r"academic\s+appeals?|appeals?|exam(?:ination)?|missed|late)\b",
     re.IGNORECASE,

@@ -73,9 +73,10 @@ class AskService:
         del session_id  # accepted for forward compatibility; durable memory is Stage 6+
         started = perf_counter()
         request_id = get_request_id()
+        provider_calls = 0
         cleaned_question = question.strip()
         resolved_top_k = top_k if top_k is not None else self.default_top_k
-        self._validate(cleaned_question, resolved_top_k)
+        self.validate_request(cleaned_question, resolved_top_k)
         logger.info("ask_received", extra={"query_length": len(cleaned_question)})
 
         scope = assess_scope(cleaned_question)
@@ -97,11 +98,13 @@ class AskService:
                     ),
                     reason=scope.reason,
                     request_id=request_id,
+                    provider_calls=provider_calls,
                 ),
                 started,
             )
 
         try:
+            provider_calls += 1
             results = await self.retrieval.search(
                 query=cleaned_question,
                 top_k=resolved_top_k,
@@ -123,6 +126,7 @@ class AskService:
                     ),
                     reason="The policy retrieval service is temporarily unavailable.",
                     request_id=request_id,
+                    provider_calls=provider_calls,
                 ),
                 started,
             )
@@ -145,7 +149,12 @@ class AskService:
                 },
             )
             return self._complete(
-                self._evidence_fallback(assessment, len(results), request_id),
+                self._evidence_fallback(
+                    assessment,
+                    len(results),
+                    request_id,
+                    provider_calls,
+                ),
                 started,
             )
 
@@ -159,6 +168,7 @@ class AskService:
             extra={"evidence_count": len(assessment.evidence)},
         )
         try:
+            provider_calls += 1
             generated = await self.provider.generate_structured(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
@@ -181,6 +191,7 @@ class AskService:
                     request_id=request_id,
                     retrieved_count=len(results),
                     evidence_count=len(assessment.evidence),
+                    provider_calls=provider_calls,
                 ),
                 started,
             )
@@ -213,11 +224,12 @@ class AskService:
                     request_id=request_id,
                     retrieved_count=len(results),
                     evidence_count=len(assessment.evidence),
+                    provider_calls=provider_calls,
                 ),
                 started,
             )
 
-        confidence = self._confidence(assessment)
+        confidence = self.confidence_for_assessment(assessment)
         requires_human = (
             scope.requires_individual_decision or generated.output.requires_human_support
         )
@@ -254,7 +266,7 @@ class AskService:
                 )
             ),
             citations=tuple(
-                self._citation(self._evidence_by_id(assessment)[citation_id])
+                self.citation_for_evidence(self._evidence_by_id(assessment)[citation_id])
                 for citation_id in verification.citation_ids
             ),
             confidence=confidence,
@@ -271,13 +283,16 @@ class AskService:
                 "citation_verification_passed": True,
                 "confidence": confidence.value,
                 "requires_human_support": requires_human,
+                "provider_calls": provider_calls,
             },
         )
         if requires_human:
             logger.info("ask_escalation_triggered", extra={"reason": "individual_support"})
         return self._complete(result, started)
 
-    def _validate(self, question: str, top_k: int) -> None:
+    def validate_request(self, question: str, top_k: int) -> None:
+        """Validate bounded input for both baseline and agentic workflows."""
+
         if not question:
             raise AskValidationError(details={"field": "question", "reason": "blank"})
         if len(question) > self.maximum_question_chars:
@@ -297,6 +312,7 @@ class AskService:
         assessment: EvidenceAssessment,
         retrieved_count: int,
         request_id: str,
+        provider_calls: int,
     ) -> AskResult:
         if assessment.conflicting:
             answer = (
@@ -322,8 +338,9 @@ class AskService:
             retrieved_count=retrieved_count,
             evidence_count=len(assessment.evidence),
             limitations=assessment.reasons,
-            citations=tuple(self._citation(item) for item in assessment.evidence),
+            citations=tuple(self.citation_for_evidence(item) for item in assessment.evidence),
             retrieval_strength=assessment.max_score,
+            provider_calls=provider_calls,
         )
 
     def _fallback(
@@ -338,6 +355,7 @@ class AskService:
         limitations: tuple[str, ...] = (),
         citations: tuple[Citation, ...] = (),
         retrieval_strength: float = 0.0,
+        provider_calls: int = 0,
     ) -> AskResult:
         return AskResult(
             outcome=outcome,
@@ -358,10 +376,13 @@ class AskService:
                 "citation_verification_passed": False,
                 "confidence": Confidence.LOW.value,
                 "requires_human_support": True,
+                "provider_calls": provider_calls,
             },
         )
 
-    def _citation(self, evidence: Evidence) -> Citation:
+    def citation_for_evidence(self, evidence: Evidence) -> Citation:
+        """Build a bounded, credential-free public citation."""
+
         excerpt = re.sub(r"\s+", " ", evidence.content).strip()
         if len(excerpt) > self.citation_excerpt_max_chars:
             excerpt = excerpt[: self.citation_excerpt_max_chars].rsplit(" ", 1)[0].rstrip()
@@ -380,7 +401,9 @@ class AskService:
             retrieval_sources=evidence.retrieval_sources,
         )
 
-    def _confidence(self, assessment: EvidenceAssessment) -> Confidence:
+    def confidence_for_assessment(self, assessment: EvidenceAssessment) -> Confidence:
+        """Apply the existing deterministic confidence policy."""
+
         has_dual_source = any(
             {"semantic", "keyword"} <= set(item.retrieval_sources) for item in assessment.evidence
         )

@@ -24,6 +24,12 @@ _PROMPT_LEAKAGE = re.compile(
     r"\b(system prompt|developer message|hidden instructions?|begin_untrusted_evidence_json)\b",
     re.IGNORECASE,
 )
+_CONTROL_INSTRUCTION = re.compile(
+    r"\b(?:ignore\s+(?:the\s+)?(?:coordinator|system|previous\s+instructions?)|"
+    r"call\s+(?:an?\s+)?(?:unauthori[sz]ed\s+)?tool|change\s+(?:your\s+)?role|"
+    r"send\s+all\s+retrieved\s+documents|grant\s+(?:yourself|me)\s+(?:a\s+)?tool)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +80,8 @@ def verify_grounded_output(
         reasons.append("The generated answer claimed an individual decision or approval.")
     if _PROMPT_LEAKAGE.search(generated_text):
         reasons.append("The generated answer attempted to expose internal prompt instructions.")
+    if _CONTROL_INSTRUCTION.search(generated_text):
+        reasons.append("The generated answer contained an agent-control instruction.")
     if not _deadline_facts_are_supported(generated_text, cited, evidence_by_id):
         reasons.append("The generated answer introduced a deadline not found in cited evidence.")
     return VerificationResult(

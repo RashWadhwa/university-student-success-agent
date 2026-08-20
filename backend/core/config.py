@@ -40,7 +40,7 @@ class Settings(BaseSettings):
         default="University Student Success Agent",
         validation_alias="APP_NAME",
     )
-    app_version: str = Field(default="0.5.0", validation_alias="APP_VERSION")
+    app_version: str = Field(default="0.6.0", validation_alias="APP_VERSION")
     environment: Environment = Field(
         default=Environment.DEVELOPMENT,
         validation_alias="ENVIRONMENT",
@@ -231,6 +231,42 @@ class Settings(BaseSettings):
         ge=80,
         le=2000,
     )
+    agent_max_tasks: int = Field(
+        default=4,
+        validation_alias="AGENT_MAX_TASKS",
+        ge=1,
+        le=10,
+    )
+    agent_max_tool_calls: int = Field(
+        default=4,
+        validation_alias="AGENT_MAX_TOOL_CALLS",
+        ge=1,
+        le=20,
+    )
+    agent_timeout_seconds: float = Field(
+        default=20.0,
+        validation_alias="AGENT_TIMEOUT_SECONDS",
+        gt=0,
+        le=120,
+    )
+    agent_max_retries: int = Field(
+        default=1,
+        validation_alias="AGENT_MAX_RETRIES",
+        ge=0,
+        le=3,
+    )
+    agent_max_evidence_items: int = Field(
+        default=5,
+        validation_alias="AGENT_MAX_EVIDENCE_ITEMS",
+        ge=1,
+        le=20,
+    )
+    agent_max_provider_calls: int = Field(
+        default=5,
+        validation_alias="AGENT_MAX_PROVIDER_CALLS",
+        ge=3,
+        le=20,
+    )
 
     @field_validator("log_level", mode="before")
     @classmethod
@@ -276,6 +312,8 @@ class Settings(BaseSettings):
             raise ValueError("ASK_DEFAULT_TOP_K must not exceed ASK_MAX_TOP_K")
         if self.ask_min_evidence_count > self.ask_max_evidence_chunks:
             raise ValueError("ASK_MIN_EVIDENCE_COUNT must not exceed ASK_MAX_EVIDENCE_CHUNKS")
+        if self.ask_min_evidence_count > self.agent_max_evidence_items:
+            raise ValueError("ASK_MIN_EVIDENCE_COUNT must not exceed AGENT_MAX_EVIDENCE_ITEMS")
         return self
 
     @property

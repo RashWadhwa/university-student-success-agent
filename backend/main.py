@@ -8,6 +8,16 @@ from datetime import UTC, datetime
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.agents.coordinator import Coordinator
+from backend.agents.registry import AgentRegistry
+from backend.agents.service import AgenticAskService
+from backend.agents.specialists import (
+    PolicyAnalyst,
+    RetrievalSpecialist,
+    StudentSupportSpecialist,
+)
+from backend.agents.tools import build_tool_executor
+from backend.agents.verification import WorkflowVerifier
 from backend.api.router import service_router, v1_router
 from backend.ask.service import AskService
 from backend.core.config import Settings, get_settings
@@ -53,6 +63,7 @@ def create_app(
         app.state.indexing_service = None
         app.state.retrieval_service = None
         app.state.ask_service = None
+        app.state.agentic_ask_service = None
         app.state.document_manager = document_manager or DocumentManager(
             storage_path=resolved_settings.document_storage_path,
             max_file_size_bytes=resolved_settings.max_document_size_bytes,
@@ -97,6 +108,34 @@ def create_app(
                 maximum_question_chars=resolved_settings.ask_max_question_chars,
                 citation_excerpt_max_chars=resolved_settings.citation_excerpt_max_chars,
             )
+            registry = AgentRegistry(
+                timeout_seconds=resolved_settings.agent_timeout_seconds,
+                maximum_retries=resolved_settings.agent_max_retries,
+            )
+            tools = build_tool_executor(
+                registry=registry,
+                retrieval=app.state.retrieval_service,
+                minimum_evidence_count=resolved_settings.ask_min_evidence_count,
+                minimum_retrieval_score=resolved_settings.ask_min_retrieval_score,
+                maximum_evidence_items=resolved_settings.agent_max_evidence_items,
+                evidence_max_chars_per_chunk=(resolved_settings.ask_evidence_max_chars_per_chunk),
+            )
+            app.state.agentic_ask_service = AgenticAskService(
+                baseline=app.state.ask_service,
+                coordinator=Coordinator(
+                    registry=registry,
+                    maximum_tasks=resolved_settings.agent_max_tasks,
+                ),
+                registry=registry,
+                retrieval_specialist=RetrievalSpecialist(tools=tools),
+                policy_analyst=PolicyAnalyst(provider=active_provider),
+                support_specialist=StudentSupportSpecialist(provider=active_provider),
+                verifier=WorkflowVerifier(),
+                maximum_tasks=resolved_settings.agent_max_tasks,
+                maximum_tool_calls=resolved_settings.agent_max_tool_calls,
+                maximum_evidence_items=resolved_settings.agent_max_evidence_items,
+                maximum_provider_calls=resolved_settings.agent_max_provider_calls,
+            )
             logger.info(
                 "LLM provider initialised",
                 extra={
@@ -125,6 +164,7 @@ def create_app(
             app.state.indexing_service = None
             app.state.retrieval_service = None
             app.state.ask_service = None
+            app.state.agentic_ask_service = None
             try:
                 if active_provider is not None:
                     await active_provider.close()
@@ -156,6 +196,7 @@ def create_app(
     app.state.indexing_service = None
     app.state.retrieval_service = None
     app.state.ask_service = None
+    app.state.agentic_ask_service = None
 
     if resolved_settings.cors_origins:
         app.add_middleware(
