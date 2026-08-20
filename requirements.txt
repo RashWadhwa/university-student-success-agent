@@ -9,3 +9,4 @@ alembic
 pytest
 uvicorn
 python-multipart
+pypdf>=5.7,<7.0

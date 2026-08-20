@@ -13,6 +13,7 @@ from backend.core.config import Settings, get_settings
 from backend.core.exceptions import register_exception_handlers
 from backend.core.logging import configure_logging
 from backend.core.middleware import RequestContextMiddleware
+from backend.documents.manager import DocumentManager
 from backend.llm.base import LLMProvider
 from backend.llm.errors import LLMConfigurationError
 from backend.llm.factory import create_llm_provider
@@ -24,6 +25,7 @@ def create_app(
     settings: Settings | None = None,
     *,
     llm_provider: LLMProvider | None = None,
+    document_manager: DocumentManager | None = None,
 ) -> FastAPI:
     """Create and configure a FastAPI application instance."""
 
@@ -36,6 +38,12 @@ def create_app(
         app.state.started_at = datetime.now(UTC)
         app.state.llm_provider = None
         app.state.llm_provider_error = None
+        app.state.document_manager = document_manager or DocumentManager(
+            storage_path=resolved_settings.document_storage_path,
+            max_file_size_bytes=resolved_settings.max_document_size_bytes,
+            chunk_size=resolved_settings.chunk_size,
+            chunk_overlap=resolved_settings.chunk_overlap,
+        )
         logger.info(
             "Application starting",
             extra={
@@ -43,6 +51,7 @@ def create_app(
                 "version": resolved_settings.app_version,
                 "environment": resolved_settings.environment.value,
                 "llm_provider": resolved_settings.llm_provider.value,
+                "document_storage_path": str(resolved_settings.document_storage_path),
             },
         )
 
@@ -74,6 +83,7 @@ def create_app(
             yield
         finally:
             app.state.ready = False
+            app.state.document_manager = None
             if active_provider is not None:
                 await active_provider.close()
             logger.info("Application stopped")
@@ -96,6 +106,7 @@ def create_app(
     app.state.started_at = datetime.now(UTC)
     app.state.llm_provider = None
     app.state.llm_provider_error = None
+    app.state.document_manager = None
 
     if resolved_settings.cors_origins:
         app.add_middleware(

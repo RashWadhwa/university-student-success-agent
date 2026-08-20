@@ -13,7 +13,9 @@ COPY pyproject.toml README.md ./
 COPY backend ./backend
 
 RUN python -m pip install --upgrade pip \
-    && python -m pip install .
+    && python -m pip install . \
+    && mkdir -p /app/data/documents \
+    && chown -R appuser:appgroup /app/data
 
 USER appuser
 

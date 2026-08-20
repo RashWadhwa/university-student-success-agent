@@ -2,6 +2,8 @@
 
 from fastapi import Request
 
+from backend.core.exceptions import ServiceNotReadyError
+from backend.documents.manager import DocumentManager
 from backend.llm.base import LLMProvider
 from backend.llm.errors import LLMConfigurationError
 
@@ -15,3 +17,12 @@ def get_llm_provider(request: Request) -> LLMProvider:
         details = {"reason": error} if error else None
         raise LLMConfigurationError(details=details)
     return provider
+
+
+def get_document_manager(request: Request) -> DocumentManager:
+    """Return the application-scoped document ingestion service."""
+
+    manager: DocumentManager | None = getattr(request.app.state, "document_manager", None)
+    if manager is None:
+        raise ServiceNotReadyError(details={"failed_checks": ["document_manager"]})
+    return manager

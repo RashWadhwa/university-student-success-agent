@@ -1,6 +1,7 @@
 """Shared pytest fixtures."""
 
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -11,7 +12,7 @@ from backend.main import create_app
 
 
 @pytest.fixture
-def test_settings() -> Settings:
+def test_settings(tmp_path: Path) -> Settings:
     return Settings(
         _env_file=None,
         app_name="Student Success Agent Test",
@@ -22,6 +23,7 @@ def test_settings() -> Settings:
         log_level="CRITICAL",
         cors_origins=[],
         llm_provider=LLMProviderName.MOCK,
+        document_storage_path=tmp_path / "documents",
     )
 
 

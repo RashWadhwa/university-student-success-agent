@@ -2,9 +2,10 @@
 
 from enum import StrEnum
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -39,7 +40,7 @@ class Settings(BaseSettings):
         default="University Student Success Agent",
         validation_alias="APP_NAME",
     )
-    app_version: str = Field(default="0.2.0", validation_alias="APP_VERSION")
+    app_version: str = Field(default="0.3.0", validation_alias="APP_VERSION")
     environment: Environment = Field(
         default=Environment.DEVELOPMENT,
         validation_alias="ENVIRONMENT",
@@ -117,6 +118,28 @@ class Settings(BaseSettings):
         default=True,
         validation_alias="ENABLE_LLM_SMOKE_TEST",
     )
+    document_storage_path: Path = Field(
+        default=Path("data/documents"),
+        validation_alias="DOCUMENT_STORAGE_PATH",
+    )
+    max_document_size_bytes: int = Field(
+        default=10 * 1024 * 1024,
+        validation_alias="MAX_DOCUMENT_SIZE_BYTES",
+        ge=1024,
+        le=100 * 1024 * 1024,
+    )
+    chunk_size: int = Field(
+        default=1200,
+        validation_alias="CHUNK_SIZE",
+        ge=100,
+        le=100_000,
+    )
+    chunk_overlap: int = Field(
+        default=200,
+        validation_alias="CHUNK_OVERLAP",
+        ge=0,
+        le=20_000,
+    )
 
     @field_validator("log_level", mode="before")
     @classmethod
@@ -151,6 +174,14 @@ class Settings(BaseSettings):
         if isinstance(value, str) and not value.strip():
             return None
         return value
+
+    @model_validator(mode="after")
+    def validate_chunk_configuration(self) -> "Settings":
+        """Ensure overlap cannot prevent the chunker from making progress."""
+
+        if self.chunk_overlap >= self.chunk_size:
+            raise ValueError("CHUNK_OVERLAP must be smaller than CHUNK_SIZE")
+        return self
 
     @property
     def is_production(self) -> bool:
