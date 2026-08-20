@@ -1,0 +1,49 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: student-success-api
+    command: >
+      uvicorn backend.main:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+    environment:
+      APP_NAME: ${APP_NAME:-University Student Success Agent}
+      APP_VERSION: ${APP_VERSION:-0.2.0}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      DEBUG: ${DEBUG:-true}
+      DOCS_ENABLED: ${DOCS_ENABLED:-true}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      API_V1_PREFIX: ${API_V1_PREFIX:-/api/v1}
+      CORS_ORIGINS: '${CORS_ORIGINS:-["http://localhost:3000","http://localhost:8501"]}'
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      OPENAI_ORG_ID: ${OPENAI_ORG_ID:-}
+      OPENAI_PROJECT_ID: ${OPENAI_PROJECT_ID:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-60}
+      LLM_CONNECT_TIMEOUT_SECONDS: ${LLM_CONNECT_TIMEOUT_SECONDS:-5}
+      LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-2}
+      LLM_MAX_OUTPUT_TOKENS: ${LLM_MAX_OUTPUT_TOKENS:-1200}
+      ENABLE_LLM_SMOKE_TEST: ${ENABLE_LLM_SMOKE_TEST:-true}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app/backend
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped

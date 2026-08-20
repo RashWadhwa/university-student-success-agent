@@ -1,0 +1,11 @@
+fastapi
+pydantic
+pydantic-settings
+openai
+sqlalchemy
+pgvector
+redis
+alembic
+pytest
+uvicorn
+python-multipart
