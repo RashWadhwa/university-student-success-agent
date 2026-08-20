@@ -5,7 +5,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, UploadFile, status
 
-from backend.api.dependencies import get_document_manager, get_indexing_service
+from backend.api.dependencies import (
+    get_document_manager,
+    get_indexing_service,
+    get_primary_institution_name,
+)
 from backend.documents.manager import DocumentManager
 from backend.rag.errors import DocumentNotFoundError
 from backend.rag.indexing import IndexingService
@@ -42,9 +46,13 @@ async def index_document(
     request: DocumentIndexRequest,
     manager: Annotated[DocumentManager, Depends(get_document_manager)],
     service: Annotated[IndexingService, Depends(get_indexing_service)],
+    primary_institution: Annotated[str, Depends(get_primary_institution_name)],
 ) -> DocumentIndexResponse:
     record = manager.get_document(str(document_id))
     if record is None:
         raise DocumentNotFoundError(str(document_id))
-    result = await service.index_document(record, request.to_domain())
+    result = await service.index_document(
+        record,
+        request.to_domain(default_institution=primary_institution),
+    )
     return DocumentIndexResponse.from_result(result)

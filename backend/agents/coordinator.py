@@ -30,6 +30,8 @@ class Coordinator:
     """Choose baseline delegation or one fixed specialist sequence."""
 
     def __init__(self, *, registry: AgentRegistry, maximum_tasks: int) -> None:
+        if not 1 <= maximum_tasks <= 10:
+            raise AgentLimitError(details={"limit": "tasks"})
         self.registry = registry
         self.maximum_tasks = maximum_tasks
 

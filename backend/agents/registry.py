@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from pydantic import BaseModel
 
-from backend.agents.errors import AgentRegistryError, ToolAuthorizationError
+from backend.agents.errors import AgentLimitError, AgentRegistryError, ToolAuthorizationError
 from backend.agents.models import (
     CoordinatorDecision,
     CoordinatorInput,
@@ -38,6 +38,10 @@ class AgentRegistry:
     """Resolve only statically registered agents and tool permissions."""
 
     def __init__(self, *, timeout_seconds: float, maximum_retries: int) -> None:
+        if not 0 <= maximum_retries <= 3:
+            raise AgentLimitError(details={"limit": "retries"})
+        if not 0 < timeout_seconds <= 120:
+            raise AgentLimitError(details={"limit": "timeout"})
         self._tool_permissions = {
             ToolName.SEARCH_KNOWLEDGE_BASE: ToolPermission.READ,
             ToolName.GET_DOCUMENT_SECTION: ToolPermission.READ,

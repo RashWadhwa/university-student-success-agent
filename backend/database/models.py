@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
@@ -30,10 +31,25 @@ class DocumentModel(Base):
 
     __tablename__ = "documents"
     __table_args__ = (
+        CheckConstraint(
+            "corpus_tier IN ('primary', 'secondary')",
+            name="ck_documents_corpus_tier",
+        ),
+        CheckConstraint(
+            "authority_scope IN ('institution_policy', 'sector_guidance')",
+            name="ck_documents_authority_scope",
+        ),
+        CheckConstraint(
+            "(corpus_tier = 'primary' AND authority_scope = 'institution_policy') OR "
+            "(corpus_tier = 'secondary' AND authority_scope = 'sector_guidance')",
+            name="ck_documents_source_classification",
+        ),
         Index("ix_documents_document_type", "document_type"),
         Index("ix_documents_institution", "institution"),
         Index("ix_documents_effective_date", "effective_date"),
         Index("ix_documents_source", "source"),
+        Index("ix_documents_corpus_tier", "corpus_tier"),
+        Index("ix_documents_authority_scope", "authority_scope"),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -48,6 +64,10 @@ class DocumentModel(Base):
     review_date: Mapped[date | None] = mapped_column(Date)
     version: Mapped[str | None] = mapped_column(String(100))
     source: Mapped[str | None] = mapped_column(String(2048))
+    corpus_tier: Mapped[str] = mapped_column(String(20), nullable=False, default="primary")
+    authority_scope: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="institution_policy"
+    )
     mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
     file_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     checksum: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)

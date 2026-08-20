@@ -5,8 +5,16 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 
 from backend.agents.service import AgenticAskService
-from backend.api.dependencies import get_agentic_ask_service, get_ask_service
+from backend.api.dependencies import (
+    get_agentic_ask_service,
+    get_ask_service,
+    get_observability,
+    get_primary_institution_name,
+)
 from backend.ask.service import AskService
+from backend.core.context import get_request_id
+from backend.observability.base import ObservabilityService
+from backend.observability.events import record_ask_result, record_ask_started
 from backend.schemas.agentic import AgenticAskResponse
 from backend.schemas.ask import AskRequest, AskResponse
 
@@ -17,14 +25,23 @@ router = APIRouter(tags=["ask"])
 async def ask(
     request: AskRequest,
     service: Annotated[AskService, Depends(get_ask_service)],
+    observability: Annotated[ObservabilityService, Depends(get_observability)],
+    primary_institution: Annotated[str, Depends(get_primary_institution_name)],
 ) -> AskResponse:
+    await record_ask_started(
+        observability,
+        request_id=get_request_id(),
+        workflow_mode="baseline",
+        input_length=len(request.question),
+    )
     result = await service.answer(
         question=request.question,
         top_k=request.top_k,
-        filters=request.filters.to_domain(),
+        filters=request.filters.to_domain(default_institution=primary_institution),
         session_id=request.session_id,
     )
-    return AskResponse.from_result(result)
+    trace_id = await record_ask_result(observability, result)
+    return AskResponse.from_result(result).model_copy(update={"trace_id": trace_id})
 
 
 @router.post(
@@ -39,11 +56,20 @@ async def ask(
 async def ask_agentic(
     request: AskRequest,
     service: Annotated[AgenticAskService, Depends(get_agentic_ask_service)],
+    observability: Annotated[ObservabilityService, Depends(get_observability)],
+    primary_institution: Annotated[str, Depends(get_primary_institution_name)],
 ) -> AgenticAskResponse:
+    await record_ask_started(
+        observability,
+        request_id=get_request_id(),
+        workflow_mode="agentic",
+        input_length=len(request.question),
+    )
     result = await service.answer(
         question=request.question,
         top_k=request.top_k,
-        filters=request.filters.to_domain(),
+        filters=request.filters.to_domain(default_institution=primary_institution),
         session_id=request.session_id,
     )
-    return AgenticAskResponse.from_result(result)
+    trace_id = await record_ask_result(observability, result)
+    return AgenticAskResponse.from_result(result).model_copy(update={"trace_id": trace_id})

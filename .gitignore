@@ -27,5 +27,9 @@ Thumbs.db
 build/
 dist/
 
-# Runtime document storage
-data/
+# Runtime document storage; synthetic evaluation fixtures are versioned.
+data/*
+!data/evaluation/
+!data/evaluation/*.jsonl
+!data/institutions/
+!data/institutions/*.json

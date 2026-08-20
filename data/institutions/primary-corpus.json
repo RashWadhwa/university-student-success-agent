@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "verified_at": "2026-08-20",
+  "source_catalog_url": "https://www.harper-adams.ac.uk/study/1014/key-information/",
+  "corpus_tier": "primary",
+  "authority_scope": "institution_policy",
+  "documents": [
+    {
+      "id": "mitigating-circumstances",
+      "filename": "mitigating-circumstances.pdf",
+      "title": "Arrangements for Claiming Mitigating Circumstances",
+      "source_url": "https://cdn.harper-adams.ac.uk/document/ki/key-info-page/Mitigating-Circumstances-Arrangements-for-Claiming.pdf",
+      "document_type": "mitigating_circumstances_policy",
+      "effective_date": null,
+      "review_date": null,
+      "approval_date_text": "Academic Standards Committee, October 2010",
+      "effective_date_text": "Revised September 2023",
+      "review_date_text": null,
+      "version": "AQAM Annex 5.28, revised September 2023",
+      "policy_domains": [
+        "mitigating circumstances",
+        "extensions",
+        "missed assessment",
+        "deferral",
+        "condonement",
+        "retake",
+        "supporting evidence"
+      ]
+    },
+    {
+      "id": "assessment-regulations-2025-26",
+      "filename": "assessment-regulations-2025-26.pdf",
+      "title": "Assessment Scheme and Regulations for Taught and Master of Research Courses",
+      "source_url": "https://cdn.harper-adams.ac.uk/document/ki/key-info-page/Assessment-Regulations.pdf",
+      "document_type": "assessment_regulations",
+      "effective_date": null,
+      "review_date": null,
+      "approval_date_text": "Academic Standards Committee, May 2011",
+      "effective_date_text": "2025/26 academic session; revised September 2025",
+      "review_date_text": null,
+      "version": "2025/26, AQAM Annex 5.01",
+      "policy_domains": [
+        "assessment regulations",
+        "reassessment",
+        "progression",
+        "mitigating circumstances",
+        "academic appeals",
+        "late submission",
+        "missed assessment"
+      ]
+    },
+    {
+      "id": "assessment-arrangements",
+      "filename": "assessment-arrangements.pdf",
+      "title": "Assessment Arrangements",
+      "source_url": "https://cdn.harper-adams.ac.uk/document/ki/key-info-page/Assessment-Arrangements.pdf",
+      "document_type": "assessment_procedure",
+      "effective_date": null,
+      "review_date": null,
+      "approval_date_text": "Academic Standards Committee, October 2011",
+      "effective_date_text": "Revised June 2025",
+      "review_date_text": null,
+      "version": "AQAM Annex 5.29, revised June 2025",
+      "policy_domains": [
+        "assessment submission",
+        "late submission",
+        "reassessment submission",
+        "mitigating circumstances",
+        "academic appeals",
+        "feedback"
+      ]
+    },
+    {
+      "id": "academic-appeals-2023-26",
+      "filename": "academic-appeals-2023-26.pdf",
+      "title": "Academic Appeals Policy and Procedure",
+      "source_url": "https://www.harper-adams.ac.uk/documents/Academic-appeals-procedure.pdf",
+      "document_type": "academic_appeals_policy",
+      "effective_date": null,
+      "review_date": null,
+      "approval_date_text": "Academic Board, September 2023",
+      "effective_date_text": "2023–2026",
+      "review_date_text": "2026",
+      "version": "2023–2026, AQAM Annex 5.09",
+      "policy_domains": [
+        "academic appeals",
+        "appeal grounds",
+        "appeal deadlines",
+        "assessment decisions",
+        "mitigating circumstances",
+        "escalation"
+      ]
+    },
+    {
+      "id": "student-engagement-policy",
+      "filename": "student-engagement-policy.pdf",
+      "title": "Student Engagement Policy",
+      "source_url": "https://cdn.harper-adams.ac.uk/document/ki/key-info-page/Student-Engagement-Policy.pdf",
+      "document_type": "student_support_policy",
+      "effective_date": null,
+      "review_date": null,
+      "approval_date_text": "Academic Board",
+      "effective_date_text": "Last reviewed November 2025",
+      "review_date_text": "Spring 2026",
+      "version": "Last reviewed November 2025",
+      "policy_domains": [
+        "student engagement",
+        "attendance",
+        "extensions",
+        "student services",
+        "learner support",
+        "academic guidance",
+        "wellbeing support",
+        "escalation"
+      ]
+    }
+  ]
+}

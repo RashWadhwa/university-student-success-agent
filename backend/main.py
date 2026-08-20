@@ -26,9 +26,16 @@ from backend.core.logging import configure_logging
 from backend.core.middleware import RequestContextMiddleware
 from backend.database.manager import DatabaseManager
 from backend.documents.manager import DocumentManager
+from backend.evaluation.base import EvaluationProvider
+from backend.evaluation.dataset import EvaluationDataset
+from backend.evaluation.errors import EvaluationError
+from backend.evaluation.factory import create_evaluation_provider
+from backend.evaluation.runner import EvaluationRunner
 from backend.llm.base import LLMProvider
 from backend.llm.errors import LLMConfigurationError
 from backend.llm.factory import create_llm_provider
+from backend.observability.base import ObservabilityService
+from backend.observability.factory import create_observability
 from backend.rag.indexing import IndexingService
 from backend.rag.retrieval import RetrievalService
 
@@ -41,6 +48,8 @@ def create_app(
     llm_provider: LLMProvider | None = None,
     document_manager: DocumentManager | None = None,
     database_manager: DatabaseManager | None = None,
+    evaluation_provider: EvaluationProvider | None = None,
+    observability: ObservabilityService | None = None,
 ) -> FastAPI:
     """Create and configure a FastAPI application instance."""
 
@@ -53,6 +62,10 @@ def create_app(
         app.state.started_at = datetime.now(UTC)
         app.state.llm_provider = None
         app.state.llm_provider_error = None
+        app.state.observability = observability or create_observability(resolved_settings)
+        app.state.evaluation_provider = None
+        app.state.evaluation_provider_error = None
+        app.state.evaluation_runner = None
         app.state.database_manager = database_manager or DatabaseManager(
             resolved_settings.database_url.get_secret_value(),
             pool_size=resolved_settings.database_pool_size,
@@ -77,7 +90,7 @@ def create_app(
                 "version": resolved_settings.app_version,
                 "environment": resolved_settings.environment.value,
                 "llm_provider": resolved_settings.llm_provider.value,
-                "document_storage_path": str(resolved_settings.document_storage_path),
+                "observability": app.state.observability.name,
             },
         )
 
@@ -155,6 +168,37 @@ def create_app(
                 },
             )
 
+        active_evaluation_provider: EvaluationProvider | None = None
+        try:
+            active_evaluation_provider = evaluation_provider or create_evaluation_provider(
+                resolved_settings
+            )
+            app.state.evaluation_provider = active_evaluation_provider
+            if app.state.ask_service is not None and app.state.agentic_ask_service is not None:
+                app.state.evaluation_runner = EvaluationRunner(
+                    dataset=EvaluationDataset(resolved_settings.evaluation_dataset_path),
+                    baseline=app.state.ask_service,
+                    agentic=app.state.agentic_ask_service,
+                    provider=active_evaluation_provider,
+                    observability=app.state.observability,
+                    maximum_cases=resolved_settings.eval_max_cases_per_run,
+                    maximum_judge_calls=resolved_settings.eval_max_judge_calls,
+                    timeout_seconds=resolved_settings.eval_timeout_seconds,
+                )
+            logger.info(
+                "Evaluation provider initialised",
+                extra={
+                    "evaluation_provider": active_evaluation_provider.name,
+                    "evaluation_model": active_evaluation_provider.model,
+                },
+            )
+        except EvaluationError as exc:
+            app.state.evaluation_provider_error = exc.code
+            logger.info(
+                "Evaluation provider is unavailable",
+                extra={"error_code": exc.code},
+            )
+
         app.state.ready = True
         try:
             yield
@@ -165,12 +209,22 @@ def create_app(
             app.state.retrieval_service = None
             app.state.ask_service = None
             app.state.agentic_ask_service = None
+            app.state.evaluation_runner = None
             try:
-                if active_provider is not None:
-                    await active_provider.close()
+                try:
+                    if active_evaluation_provider is not None:
+                        await active_evaluation_provider.close()
+                finally:
+                    app.state.evaluation_provider = None
+                    if active_provider is not None:
+                        await active_provider.close()
             finally:
-                await app.state.database_manager.close()
-                app.state.database_manager = None
+                try:
+                    await app.state.observability.close()
+                    app.state.observability = None
+                finally:
+                    await app.state.database_manager.close()
+                    app.state.database_manager = None
             logger.info("Application stopped")
 
     app = FastAPI(
@@ -191,6 +245,10 @@ def create_app(
     app.state.started_at = datetime.now(UTC)
     app.state.llm_provider = None
     app.state.llm_provider_error = None
+    app.state.observability = None
+    app.state.evaluation_provider = None
+    app.state.evaluation_provider_error = None
+    app.state.evaluation_runner = None
     app.state.document_manager = None
     app.state.database_manager = None
     app.state.indexing_service = None

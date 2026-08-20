@@ -12,6 +12,7 @@ from backend.ask.types import (
     Confidence,
     RecommendedAction,
 )
+from backend.core.config import Settings
 from backend.core.context import get_request_id
 
 
@@ -78,6 +79,7 @@ class FakeAskService:
 def test_valid_ask_returns_typed_grounded_response(
     app: FastAPI,
     client: TestClient,
+    test_settings: Settings,
 ) -> None:
     service = FakeAskService()
     app.state.ask_service = service
@@ -97,10 +99,14 @@ def test_valid_ask_returns_typed_grounded_response(
     assert body["outcome"] == "answered"
     assert body["citations"][0]["citation_id"] == "E1"
     assert body["citations"][0]["page"] == 7
+    assert body["citations"][0]["corpus_tier"] == "primary"
+    assert body["citations"][0]["authority_scope"] == "institution_policy"
     assert body["confidence"] == "high"
     assert body["request_id"] == "ask-request-1"
     assert body["evaluation"]["citation_verification_passed"] is True
     assert service.calls[0]["top_k"] == 5
+    assert service.calls[0]["filters"].institution == test_settings.primary_institution_name
+    assert service.calls[0]["filters"].corpus_tier.value == "primary"
 
 
 def test_empty_question_uses_existing_validation_envelope(client: TestClient) -> None:

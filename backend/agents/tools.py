@@ -111,6 +111,8 @@ class ToolExecutor:
         context: ToolContext,
     ) -> BaseModel:
         started = perf_counter()
+        if not 1 <= context.maximum_calls <= 20:
+            raise AgentLimitError(details={"limit": "tool_calls"})
         try:
             tool_name = ToolName(tool)
             definition = self._definitions[tool_name]

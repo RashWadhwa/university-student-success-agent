@@ -246,6 +246,11 @@ class AskService:
             )
 
         limitations = list(generated.output.limitations)
+        if any(item.authority_scope.value == "sector_guidance" for item in assessment.evidence):
+            limitations.append(
+                "Secondary sector guidance is contextual and does not replace the primary "
+                "institution's policy."
+            )
         if assessment.older_versions_omitted:
             limitations.append(
                 "Older retrieved policy versions were omitted in favour of the latest "
@@ -399,6 +404,9 @@ class AskService:
             version=evidence.version,
             effective_date=evidence.effective_date,
             retrieval_sources=evidence.retrieval_sources,
+            institution=evidence.institution,
+            corpus_tier=evidence.corpus_tier,
+            authority_scope=evidence.authority_scope,
         )
 
     def confidence_for_assessment(self, assessment: EvidenceAssessment) -> Confidence:

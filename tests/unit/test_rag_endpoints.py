@@ -6,13 +6,17 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from backend.core.config import Settings
 from backend.rag.types import FusedRetrievalResult, IndexingResult, RetrievalCandidate
 from tests.pdf_factory import make_pdf
 
 
 class FakeRetrievalService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
     async def search(self, **kwargs: object) -> list[FusedRetrievalResult]:
-        del kwargs
+        self.calls.append(kwargs)
         candidate = RetrievalCandidate(
             chunk_id="chunk-123",
             document_id="document-456",
@@ -42,8 +46,10 @@ class FakeRetrievalService:
 def test_valid_retrieval_returns_citation_ready_result(
     app: FastAPI,
     client: TestClient,
+    test_settings: Settings,
 ) -> None:
-    app.state.retrieval_service = FakeRetrievalService()
+    service = FakeRetrievalService()
+    app.state.retrieval_service = service
 
     response = client.post(
         "/api/v1/retrieval/search",
@@ -60,6 +66,9 @@ def test_valid_retrieval_returns_citation_ready_result(
     assert result["section"] == "4.2 Evidence"
     assert result["retrieval_sources"] == ["semantic", "keyword"]
     assert result["metadata"]["version"] == "3.0"
+    assert result["metadata"]["corpus_tier"] == "primary"
+    assert result["metadata"]["authority_scope"] == "institution_policy"
+    assert service.calls[0]["filters"].institution == test_settings.primary_institution_name
 
 
 def test_retrieval_request_validation_uses_structured_errors(client: TestClient) -> None:
@@ -69,10 +78,21 @@ def test_retrieval_request_validation_uses_structured_errors(client: TestClient)
         "/api/v1/retrieval/search",
         json={"query": "appeal", "filters": {"arbitrary_sql": "DROP TABLE chunks"}},
     )
+    ambiguous_secondary = client.post(
+        "/api/v1/retrieval/search",
+        json={
+            "query": "appeal",
+            "filters": {
+                "corpus_tier": "secondary",
+                "authority_scope": "sector_guidance",
+            },
+        },
+    )
 
     assert empty.status_code == 422
     assert invalid_top_k.status_code == 422
     assert invalid_filter.status_code == 422
+    assert ambiguous_secondary.status_code == 422
     assert invalid_filter.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
@@ -92,8 +112,11 @@ def test_invalid_filter_date_range_is_rejected(client: TestClient) -> None:
 
 
 class FakeIndexingService:
+    def __init__(self) -> None:
+        self.metadata: object | None = None
+
     async def index_document(self, record: object, metadata: object) -> IndexingResult:
-        del metadata
+        self.metadata = metadata
         return IndexingResult(
             document_id=record.id,  # type: ignore[attr-defined]
             status="indexed",
@@ -106,8 +129,10 @@ class FakeIndexingService:
 def test_valid_indexing_request_uses_ingested_record(
     app: FastAPI,
     client: TestClient,
+    test_settings: Settings,
 ) -> None:
-    app.state.indexing_service = FakeIndexingService()
+    service = FakeIndexingService()
+    app.state.indexing_service = service
     upload = client.post(
         "/api/v1/documents",
         files={
@@ -128,6 +153,7 @@ def test_valid_indexing_request_uses_ingested_record(
     assert response.status_code == 200
     assert response.json()["status"] == "indexed"
     assert response.json()["document_id"] == document_id
+    assert service.metadata.institution == test_settings.primary_institution_name  # type: ignore[attr-defined]
 
 
 def test_indexing_unknown_ingestion_record_returns_404(

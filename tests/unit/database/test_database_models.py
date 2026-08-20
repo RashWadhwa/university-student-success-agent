@@ -4,7 +4,7 @@ from sqlalchemy.dialects import postgresql
 
 from backend.database.manager import normalise_async_database_url
 from backend.database.models import ChunkModel, DocumentModel
-from backend.rag.types import SearchFilters
+from backend.rag.types import AuthorityScope, CorpusTier, SearchFilters
 from backend.repositories.documents import DocumentVectorRepository
 
 
@@ -32,9 +32,19 @@ def test_models_define_vector_foreign_key_and_duplicate_constraints() -> None:
 def test_repository_filters_compile_to_bound_parameters() -> None:
     statement = DocumentVectorRepository._apply_filters(
         DocumentModel.__table__.select(),
-        SearchFilters(institution="Example University", source="policy-source"),
+        SearchFilters(
+            institution="Example University",
+            source="policy-source",
+            corpus_tier=CorpusTier.SECONDARY,
+            authority_scope=AuthorityScope.SECTOR_GUIDANCE,
+        ),
     )
     compiled = statement.compile(dialect=postgresql.dialect())
 
     assert "Example University" not in str(compiled)
-    assert set(compiled.params.values()) == {"Example University", "policy-source"}
+    assert set(compiled.params.values()) == {
+        "Example University",
+        "policy-source",
+        "secondary",
+        "sector_guidance",
+    }

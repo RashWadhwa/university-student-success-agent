@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from enum import StrEnum
 
-from backend.rag.types import RetrievalSource, SearchFilters
+from backend.rag.types import AuthorityScope, CorpusTier, RetrievalSource, SearchFilters
 
 
 class AskOutcome(StrEnum):
@@ -51,6 +51,9 @@ class Evidence:
     version: str | None
     effective_date: date | None
     source: str | None
+    institution: str | None = None
+    corpus_tier: CorpusTier = CorpusTier.PRIMARY
+    authority_scope: AuthorityScope = AuthorityScope.INSTITUTION_POLICY
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +86,9 @@ class Citation:
     version: str | None
     effective_date: date | None
     retrieval_sources: tuple[RetrievalSource, ...]
+    institution: str | None = None
+    corpus_tier: CorpusTier = CorpusTier.PRIMARY
+    authority_scope: AuthorityScope = AuthorityScope.INSTITUTION_POLICY
 
 
 @dataclass(frozen=True, slots=True)

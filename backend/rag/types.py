@@ -2,9 +2,24 @@
 
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from enum import StrEnum
 from typing import Any, Literal
 
 RetrievalSource = Literal["semantic", "keyword"]
+
+
+class CorpusTier(StrEnum):
+    """Provenance tier for indexed public guidance."""
+
+    PRIMARY = "primary"
+    SECONDARY = "secondary"
+
+
+class AuthorityScope(StrEnum):
+    """Whether a source is binding institution policy or contextual guidance."""
+
+    INSTITUTION_POLICY = "institution_policy"
+    SECTOR_GUIDANCE = "sector_guidance"
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,6 +31,9 @@ class DocumentIndexMetadata:
     review_date: date | None = None
     version: str | None = None
     source: str | None = None
+    corpus_tier: CorpusTier = CorpusTier.PRIMARY
+    authority_scope: AuthorityScope = AuthorityScope.INSTITUTION_POLICY
+    retrieval_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +44,8 @@ class SearchFilters:
     version: str | None = None
     effective_on_or_before: date | None = None
     effective_on_or_after: date | None = None
+    corpus_tier: CorpusTier | None = CorpusTier.PRIMARY
+    authority_scope: AuthorityScope | None = AuthorityScope.INSTITUTION_POLICY
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +63,8 @@ class RetrievalCandidate:
     review_date: date | None
     source: str | None
     score: float
+    corpus_tier: CorpusTier = CorpusTier.PRIMARY
+    authority_scope: AuthorityScope = AuthorityScope.INSTITUTION_POLICY
 
 
 @dataclass(slots=True)

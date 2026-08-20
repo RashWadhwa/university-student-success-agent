@@ -2,6 +2,7 @@
 
 from enum import StrEnum
 from functools import lru_cache
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Literal
 
@@ -25,6 +26,13 @@ class LLMProviderName(StrEnum):
     MOCK = "mock"
 
 
+class EvaluationProviderName(StrEnum):
+    """Independent evaluation providers supported by Stage 7."""
+
+    GEMINI = "gemini"
+    MOCK = "mock"
+
+
 class Settings(BaseSettings):
     """Application settings loaded from environment variables or ``.env``."""
 
@@ -40,7 +48,7 @@ class Settings(BaseSettings):
         default="University Student Success Agent",
         validation_alias="APP_NAME",
     )
-    app_version: str = Field(default="0.6.0", validation_alias="APP_VERSION")
+    app_version: str = Field(default="0.7.0", validation_alias="APP_VERSION")
     environment: Environment = Field(
         default=Environment.DEVELOPMENT,
         validation_alias="ENVIRONMENT",
@@ -58,6 +66,31 @@ class Settings(BaseSettings):
             "http://localhost:8501",
         ],
         validation_alias="CORS_ORIGINS",
+    )
+    primary_institution_name: str = Field(
+        default="Harper Adams University",
+        validation_alias="PRIMARY_INSTITUTION_NAME",
+        min_length=1,
+        max_length=255,
+    )
+    primary_institution_corpus_manifest: Path = Field(
+        default=Path("data/institutions/primary-corpus.json"),
+        validation_alias="PRIMARY_INSTITUTION_CORPUS_MANIFEST",
+    )
+    primary_institution_source_hosts: list[str] = Field(
+        default_factory=lambda: [
+            "www.harper-adams.ac.uk",
+            "cdn.harper-adams.ac.uk",
+        ],
+        validation_alias="PRIMARY_INSTITUTION_SOURCE_HOSTS",
+        min_length=1,
+        max_length=20,
+    )
+    corpus_download_timeout_seconds: float = Field(
+        default=30.0,
+        validation_alias="CORPUS_DOWNLOAD_TIMEOUT_SECONDS",
+        gt=0,
+        le=120,
     )
 
     llm_provider: LLMProviderName = Field(
@@ -117,6 +150,63 @@ class Settings(BaseSettings):
     enable_llm_smoke_test: bool = Field(
         default=True,
         validation_alias="ENABLE_LLM_SMOKE_TEST",
+    )
+    eval_provider: EvaluationProviderName = Field(
+        default=EvaluationProviderName.GEMINI,
+        validation_alias="EVAL_PROVIDER",
+    )
+    eval_model: str = Field(
+        default="gemini-3.1-flash-lite",
+        validation_alias="EVAL_MODEL",
+        min_length=1,
+        max_length=200,
+    )
+    gemini_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias="GEMINI_API_KEY",
+    )
+    eval_max_cases_per_run: int = Field(
+        default=50,
+        validation_alias="EVAL_MAX_CASES_PER_RUN",
+        ge=1,
+        le=100,
+    )
+    eval_max_judge_calls: int = Field(
+        default=100,
+        validation_alias="EVAL_MAX_JUDGE_CALLS",
+        ge=0,
+        le=200,
+    )
+    eval_timeout_seconds: float = Field(
+        default=30.0,
+        validation_alias="EVAL_TIMEOUT_SECONDS",
+        gt=0,
+        le=300,
+    )
+    evaluation_dataset_path: Path = Field(
+        default=Path("data/evaluation/stage7-policy-cases.jsonl"),
+        validation_alias="EVALUATION_DATASET_PATH",
+    )
+    langfuse_enabled: bool = Field(default=False, validation_alias="LANGFUSE_ENABLED")
+    langfuse_host: str = Field(
+        default="https://cloud.langfuse.com",
+        validation_alias="LANGFUSE_HOST",
+        min_length=1,
+        max_length=2048,
+    )
+    langfuse_public_key: SecretStr | None = Field(
+        default=None,
+        validation_alias="LANGFUSE_PUBLIC_KEY",
+    )
+    langfuse_secret_key: SecretStr | None = Field(
+        default=None,
+        validation_alias="LANGFUSE_SECRET_KEY",
+    )
+    langfuse_event_timeout_seconds: float = Field(
+        default=0.5,
+        validation_alias="LANGFUSE_EVENT_TIMEOUT_SECONDS",
+        ge=0.05,
+        le=5.0,
     )
     document_storage_path: Path = Field(
         default=Path("data/documents"),
@@ -275,6 +365,45 @@ class Settings(BaseSettings):
 
         return value.upper() if isinstance(value, str) else value
 
+    @field_validator("primary_institution_name")
+    @classmethod
+    def normalise_primary_institution_name(cls, value: str) -> str:
+        """Store one bounded display/filter value for the configured institution."""
+
+        cleaned = " ".join(value.split())
+        if not cleaned:
+            raise ValueError("PRIMARY_INSTITUTION_NAME must not be blank")
+        return cleaned
+
+    @field_validator("primary_institution_source_hosts")
+    @classmethod
+    def validate_primary_institution_source_hosts(cls, values: list[str]) -> list[str]:
+        """Accept hostnames only so corpus loading cannot be configured with URL credentials."""
+
+        hosts: list[str] = []
+        for value in values:
+            host = value.strip().rstrip(".").casefold()
+            if (
+                not host
+                or "://" in host
+                or "/" in host
+                or "@" in host
+                or ":" in host
+                or "." not in host
+                or host.endswith((".local", ".internal", ".localhost"))
+                or any(character.isspace() for character in host)
+            ):
+                raise ValueError("PRIMARY_INSTITUTION_SOURCE_HOSTS must contain hostnames only")
+            try:
+                ip_address(host)
+            except ValueError:
+                pass
+            else:
+                raise ValueError("PRIMARY_INSTITUTION_SOURCE_HOSTS must not contain IP addresses")
+            if host not in hosts:
+                hosts.append(host)
+        return hosts
+
     @field_validator("api_v1_prefix")
     @classmethod
     def validate_api_prefix(cls, value: str) -> str:
@@ -292,6 +421,9 @@ class Settings(BaseSettings):
         "openai_organization",
         "openai_project",
         "openai_base_url",
+        "gemini_api_key",
+        "langfuse_public_key",
+        "langfuse_secret_key",
         mode="before",
     )
     @classmethod
@@ -314,6 +446,11 @@ class Settings(BaseSettings):
             raise ValueError("ASK_MIN_EVIDENCE_COUNT must not exceed ASK_MAX_EVIDENCE_CHUNKS")
         if self.ask_min_evidence_count > self.agent_max_evidence_items:
             raise ValueError("ASK_MIN_EVIDENCE_COUNT must not exceed AGENT_MAX_EVIDENCE_ITEMS")
+        if self.langfuse_enabled:
+            if self.langfuse_public_key is None or self.langfuse_secret_key is None:
+                raise ValueError("Langfuse keys are required when LANGFUSE_ENABLED is true")
+            if self.langfuse_host.rstrip("/") != "https://cloud.langfuse.com":
+                raise ValueError("LANGFUSE_HOST must use the Langfuse Cloud EU endpoint")
         return self
 
     @property

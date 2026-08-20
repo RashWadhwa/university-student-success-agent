@@ -3,9 +3,9 @@
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 
-from backend.rag.types import DocumentIndexMetadata, IndexingResult
+from backend.rag.types import AuthorityScope, CorpusTier, DocumentIndexMetadata, IndexingResult
 from backend.schemas.common import StrictModel
 
 
@@ -17,9 +17,36 @@ class DocumentIndexRequest(StrictModel):
     review_date: date | None = None
     version: str | None = Field(default=None, min_length=1, max_length=100)
     source: str | None = Field(default=None, min_length=1, max_length=2048)
+    corpus_tier: CorpusTier = CorpusTier.PRIMARY
+    authority_scope: AuthorityScope = AuthorityScope.INSTITUTION_POLICY
 
-    def to_domain(self) -> DocumentIndexMetadata:
-        return DocumentIndexMetadata(**self.model_dump())
+    @field_validator("institution")
+    @classmethod
+    def normalise_institution(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = " ".join(value.split())
+        if not cleaned:
+            raise ValueError("institution must not be blank")
+        return cleaned
+
+    @model_validator(mode="after")
+    def validate_source_classification(self) -> "DocumentIndexRequest":
+        expected = (
+            AuthorityScope.INSTITUTION_POLICY
+            if self.corpus_tier is CorpusTier.PRIMARY
+            else AuthorityScope.SECTOR_GUIDANCE
+        )
+        if self.authority_scope is not expected:
+            raise ValueError("corpus tier and authority scope are inconsistent")
+        if self.corpus_tier is CorpusTier.SECONDARY and self.institution is None:
+            raise ValueError("secondary guidance requires an explicit publisher")
+        return self
+
+    def to_domain(self, *, default_institution: str | None = None) -> DocumentIndexMetadata:
+        values = self.model_dump()
+        values["institution"] = self.institution or default_institution
+        return DocumentIndexMetadata(**values)
 
 
 class DocumentIndexResponse(StrictModel):

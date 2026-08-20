@@ -5,7 +5,7 @@ from datetime import date
 from pydantic import Field, field_validator
 
 from backend.ask.types import AskOutcome, AskResult, Confidence
-from backend.rag.types import RetrievalSource
+from backend.rag.types import AuthorityScope, CorpusTier, RetrievalSource
 from backend.schemas.common import StrictModel
 from backend.schemas.retrieval import RetrievalFilters
 
@@ -53,6 +53,9 @@ class AskCitation(StrictModel):
     version: str | None = None
     effective_date: date | None = None
     retrieval_sources: list[RetrievalSource]
+    institution: str | None = None
+    corpus_tier: CorpusTier
+    authority_scope: AuthorityScope
 
 
 class AskEvaluationMetadata(StrictModel):
@@ -73,6 +76,7 @@ class AskResponse(StrictModel):
     requires_human_support: bool
     human_support_reason: str | None = None
     request_id: str
+    trace_id: str | None = None
     evaluation: AskEvaluationMetadata
 
     @classmethod
@@ -101,6 +105,9 @@ class AskResponse(StrictModel):
                     version=item.version,
                     effective_date=item.effective_date,
                     retrieval_sources=list(item.retrieval_sources),
+                    institution=item.institution,
+                    corpus_tier=item.corpus_tier,
+                    authority_scope=item.authority_scope,
                 )
                 for item in result.citations
             ],
@@ -109,6 +116,7 @@ class AskResponse(StrictModel):
             requires_human_support=result.requires_human_support,
             human_support_reason=result.human_support_reason,
             request_id=result.request_id,
+            trace_id=None,
             evaluation=AskEvaluationMetadata(
                 retrieved_count=result.retrieved_count,
                 evidence_count=result.evidence_count,

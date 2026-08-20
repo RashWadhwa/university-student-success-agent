@@ -320,6 +320,11 @@ class AgenticAskService:
             if requires_human:
                 confidence = Confidence.LOW
             limitations = list(support.limitations) + list(analysis.uncertainties)
+            if any(item.authority_scope.value == "sector_guidance" for item in state.evidence):
+                limitations.append(
+                    "Secondary sector guidance is contextual and does not replace the primary "
+                    "institution's policy."
+                )
             if retrieval_output.older_versions_omitted:
                 limitations.append(
                     "Older retrieved policy versions were omitted in favour of current evidence."

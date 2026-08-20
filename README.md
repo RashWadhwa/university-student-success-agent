@@ -1,69 +1,321 @@
 # University Student Success Agent
 
-Stage 6 adds controlled, permissioned multi-agent orchestration alongside the existing
-Stage 5 single-workflow baseline. Students can ask
+Stage 7 adds a provider-independent evaluation layer alongside the Stage 5 baseline
+and Stage 6 controlled multi-agent orchestration, plus an HTTP-only Streamlit portal
+and privacy-first Langfuse observability. Students can ask
 about assessment problems, missed deadlines, extensions, mitigating circumstances,
 reassessment, and academic appeals. Policy guidance is generated only from retrieved
 university evidence and is returned with verified page-level citations.
 
+The primary institution is configuration, not application logic. The current default
+and example is Harper Adams University; changing `PRIMARY_INSTITUTION_NAME`, the
+curated manifest, and its official host allowlist changes the corpus without rewriting
+retrieval, prompts, schemas, the portal, or evaluation code.
+
 Answers are informational. They do not approve applications, replace current
 university policy, diagnose health conditions, or provide legal advice.
 
-## Architecture
+## Architecture overview
 
-```text
-POST /api/v1/documents
-        |
-        v
-DocumentManager (validation, PDF extraction, structure-aware chunks)
-        |
-POST /api/v1/documents/{document_id}/index
-        |
-        v
-IndexingService -> LLMProvider.create_embeddings -> SQLAlchemy repository
-                                                   |
-                                                   v
-                                             PostgreSQL + pgvector
-                                                   ^
-                                                   |
-POST /api/v1/retrieval/search -> RetrievalService -+
-        |                              | semantic cosine search
-        |                              | PostgreSQL full-text search
-        +------------------------------+ reciprocal rank fusion
+### High-level system flow
 
-POST /api/v1/ask
-        |
-        v
-AskService -> scope check -> RetrievalService -> evidence/freshness assessment
-        |                                      -> grounded prompt
-        v
-LLMProvider.generate_structured -> citation/claim verification
-        |                         -> deterministic confidence/escalation
-        v
-typed grounded response or safe fallback
-
-POST /api/v1/ask/agentic
-        |
-        v
-deterministic Coordinator -> typed bounded plan
-        | simple                         | multi-part
-        v                                v
-Stage 5 AskService              Retrieval Specialist -> authorised READ tool
-                                         |
-                                         v
-                                Policy Analyst -> deterministic verification
-                                         |
-                                         v
-                                Student Support -> final verifier
-                                         |
-                                         v
-                                Stage 5-compatible response + safe metrics
+```mermaid
+flowchart TD
+    UI["Streamlit portal"] --> API["FastAPI"]
+    API --> WF["Baseline / agentic workflow"]
+    WF --> RAG["RAG services + authorised tools"]
+    RAG --> DB["PostgreSQL + pgvector"]
+    WF --> LLM["Generation provider<br/>OpenAI / Claude-ready"]
+    RAG --> LLM
+    API -. "safe metadata" .-> OBS["Langfuse EU"]
+    WF -. "safe metadata" .-> OBS
 ```
 
-The code uses ordinary PostgreSQL through SQLAlchemy. Local Docker PostgreSQL and
-Supabase-hosted PostgreSQL use the same models, migrations, repositories, and
-business services; only `DATABASE_URL` changes. There is no Supabase client,
+Streamlit is an HTTP-only client. FastAPI owns validation, workflows, ingestion,
+retrieval, provider access, and safe observability. The application uses PostgreSQL
+through SQLAlchemy; local Docker PostgreSQL and Supabase-hosted PostgreSQL use the same
+models, migrations, repositories, and services. There is no Supabase client,
 LangChain, external vector database, or search cluster.
+
+## Full repository structure
+
+```text
+.
+├── backend/                  # FastAPI application and domain services
+├── frontend/                 # Unprivileged Streamlit HTTP client
+├── data/
+│   ├── evaluation/           # Versioned synthetic evaluation datasets
+│   └── institutions/         # Reviewed public-policy source manifests
+├── docs/                     # Demo and operator-facing documentation
+├── migrations/               # Alembic environment and versioned schema changes
+├── tests/
+│   ├── integration/          # Real PostgreSQL/pgvector workflow tests
+│   └── unit/                 # Isolated API and domain tests with mock providers
+├── docker/postgres/init/     # Local test-database bootstrap SQL
+├── .dockerignore             # Container build exclusions
+├── .env.example              # Placeholders and non-secret configuration examples
+├── .gitignore                # Local secrets, caches, storage, and build exclusions
+├── alembic.ini               # Alembic configuration
+├── docker-compose.yml        # Local API, frontend, migration, and database stack
+├── Dockerfile                # Application container image
+├── pyproject.toml            # Package, tooling, and test configuration
+├── requirements.txt          # Runtime dependency list
+└── README.md
+```
+
+## Backend structure
+
+```text
+backend/
+├── api/
+│   ├── dependencies.py       # FastAPI dependency accessors
+│   ├── router.py             # Versioned route composition
+│   └── routes/               # Versioned endpoint modules and service probes
+├── agents/                   # Bounded coordinator, specialists, tools, verifier
+├── ask/                      # Baseline grounded-answer workflow and verification
+├── core/                     # Typed settings, logging, middleware, errors, context
+├── corpus/                   # Reviewed official-source manifest loader and CLI
+├── database/                 # Async SQLAlchemy engine and ORM models
+├── documents/                # PDF validation, extraction, chunking, ingestion records
+├── evaluation/               # Provider-independent evaluation runner and metrics
+├── llm/                      # Generation/embedding provider interface and adapters
+├── observability/            # Redaction, no-op tracing, and Langfuse adapter
+├── rag/                      # Indexing, hybrid retrieval, fusion, retrieval metrics
+├── repositories/             # Persistence and search query boundary
+├── schemas/                  # Strict external Pydantic request/response contracts
+└── main.py                   # FastAPI application factory and service wiring
+```
+
+The route layer remains thin. Application behavior lives in the ask, agent, document,
+RAG, evaluation, and observability services; repositories own persistence queries;
+provider adapters remain replaceable.
+
+### RAG and grounded-answer flow
+
+```mermaid
+flowchart TD
+    UP["Document upload"] --> VA["PDF validation"]
+    VA --> CH["Structure-aware chunking"]
+    CH --> EM["Provider embeddings"]
+    EM --> PG["PostgreSQL + pgvector"]
+    PG --> HR["Hybrid retrieval<br/>vector + full text + RRF"]
+    HR --> GA["Grounded structured answer"]
+    GA --> CV["Citation and claim verification"]
+```
+
+Upload validation rejects unsafe, empty, oversized, encrypted, corrupt, and image-only
+PDFs. Indexing is atomic, and hybrid retrieval returns only bounded, citation-ready
+evidence with preserved document and page metadata.
+
+### Agentic workflow
+
+```mermaid
+flowchart TD
+    SR["Student request"] --> CO["Coordinator<br/>plans once"]
+    CO --> RE["Retrieval Specialist"]
+    RE --> PA["Policy Analyst"]
+    PA --> SS["Student Support Specialist"]
+    SS --> VE["Verifier"]
+    VE --> CP(["completed"])
+    VE --> ES(["escalated"])
+    VE --> FA(["failed"])
+```
+
+The registry and plan are fixed and acyclic. Hard task, tool, retry, and total provider
+budgets prevent loops; the verifier cannot restart the workflow.
+
+## Frontend structure
+
+```text
+frontend/
+├── app.py                    # Streamlit entry point and navigation
+├── api_client.py             # Sole typed HTTP boundary to FastAPI
+├── config.py                 # Frontend-only safe settings
+├── state.py                  # Non-durable UI session state
+├── components/
+│   ├── citations.py          # Bounded, source-labelled citations
+│   ├── metrics.py            # Safe evaluation/workflow metrics
+│   ├── status.py             # Service status presentation
+│   └── workflow.py           # Agent workflow presentation
+└── pages/
+    ├── ask_support.py
+    ├── knowledge_base.py
+    ├── evidence_explorer.py
+    ├── agent_activity.py
+    ├── evaluation.py
+    └── system.py
+```
+
+The frontend does not import backend services, connect to PostgreSQL, or receive model,
+database, evaluation, or observability credentials. It renders only typed API results
+and safe translated errors.
+
+## Evaluation / observability structure
+
+```text
+backend/
+├── evaluation/
+│   ├── base.py               # Replaceable EvaluationProvider contract
+│   ├── dataset.py            # Bounded JSONL dataset loading
+│   ├── errors.py             # Safe evaluator failure categories
+│   ├── factory.py            # Configuration-selected provider construction
+│   ├── metrics.py            # Deterministic scoring
+│   ├── models.py             # Strict evaluation contracts
+│   ├── runner.py             # Baseline/agentic comparison orchestration
+│   ├── tracing.py            # Safe evaluator trace metadata
+│   └── providers/
+│       ├── gemini_provider.py
+│       └── mock_provider.py
+└── observability/
+    ├── base.py               # Observability interface
+    ├── events.py             # Bounded event vocabulary
+    ├── factory.py            # Langfuse/no-op selection
+    ├── langfuse.py           # Privacy-safe Langfuse adapter
+    ├── noop.py               # Failure-safe disabled implementation
+    └── redaction.py          # Metadata allowlist and PII/secret rejection
+data/evaluation/              # Synthetic, PII-free evaluation cases
+tests/unit/evaluation/        # Judge, metrics, runner, and configuration tests
+tests/unit/observability/     # Redaction and trace-boundary tests
+```
+
+### Evaluation flow
+
+```mermaid
+flowchart TD
+    DS["Same evaluation dataset"] --> BA["Baseline workflow"]
+    DS --> AG["Agentic workflow"]
+    BA --> DM["Deterministic metrics"]
+    AG --> DM
+    BA --> GJ["Gemini 3.1 Flash Lite judge"]
+    AG --> GJ
+    DM --> TC["Langfuse trace correlation"]
+    GJ --> TC
+    TC --> CR["Comparison results"]
+```
+
+Automated tests use `MockEvaluationProvider`; no live Gemini call is made. Langfuse
+receives only allowlisted correlation and evaluator provider/model metadata—not raw
+questions, answers, evidence, prompts, rationales, secrets, or student data.
+
+## Deployment / infrastructure structure
+
+```text
+Dockerfile                     # Shared FastAPI/Streamlit application image
+docker-compose.yml             # Local PostgreSQL, migrations, API, and frontend
+docker/postgres/init/
+└── 01-create-test-database.sql
+migrations/
+├── env.py                     # Async migration environment
+├── script.py.mako
+└── versions/
+    ├── 20260820_0001_stage4_rag.py
+    └── 20260820_0002_source_classification.py
+alembic.ini
+.env.example                   # Placeholders only; .env remains untracked
+```
+
+### Deployment flow
+
+```mermaid
+flowchart TD
+    US["User"] --> ST["Render Streamlit"]
+    ST -->|"HTTPS"| API["Render FastAPI"]
+    API --> DB["Supabase PostgreSQL<br/>+ pgvector"]
+    API --> GP["OpenAI / Claude-ready<br/>generation provider"]
+    API --> EJ["Gemini evaluation judge"]
+    API -. "redacted metadata" .-> LF["Langfuse EU"]
+```
+
+All secrets stay in server-side Render/FastAPI configuration. Streamlit receives only
+the FastAPI base URL and safe public configuration.
+
+## Security and data boundaries
+
+```mermaid
+flowchart TD
+    BR["Browser"] --> ST["Streamlit<br/>no DB credentials or LLM keys"]
+    ST --> API["FastAPI boundary<br/>validation now; authentication in Stage 8"]
+    API --> SV["Application services"]
+    SV --> PP["Public university-policy corpus"]
+    SV --> DB["PostgreSQL / pgvector"]
+    SV --> EX["External model providers"]
+    SV --> RD["PII redaction + metadata allowlist"]
+    RD --> LF["Langfuse EU"]
+    API -. "Stage 8" .-> PR["Private user/case data<br/>RLS protected"]
+```
+
+- No database credentials, provider keys, or Langfuse secrets are exposed to the
+  browser or Streamlit container.
+- Request fields cross strict Pydantic and application-validation boundaries before
+  reaching services; user-controlled SQL and filter expressions are not accepted.
+- PII and sensitive content are rejected before Langfuse export.
+- The public university-policy corpus is classified and stored separately from future
+  private user or case data.
+- Stage 7 stores no persistent conversation or student data. Stage 8 will add user
+  authentication and PostgreSQL Row-Level Security for any private records it introduces.
+
+## Configurable primary-institution corpus
+
+`data/institutions/primary-corpus.json` is a deliberately small source manifest, not a
+crawler. Its first corpus uses five public PDFs selected from the configured
+institution's official [Key Information](https://www.harper-adams.ac.uk/study/1014/key-information/)
+catalogue:
+
+- [Arrangements for Claiming Mitigating Circumstances](https://cdn.harper-adams.ac.uk/document/ki/key-info-page/Mitigating-Circumstances-Arrangements-for-Claiming.pdf)
+- [Assessment Scheme and Regulations 2025/26](https://cdn.harper-adams.ac.uk/document/ki/key-info-page/Assessment-Regulations.pdf)
+- [Assessment Arrangements](https://cdn.harper-adams.ac.uk/document/ki/key-info-page/Assessment-Arrangements.pdf)
+- [Academic Appeals Policy and Procedure 2023–2026](https://www.harper-adams.ac.uk/documents/Academic-appeals-procedure.pdf)
+- [Student Engagement Policy](https://cdn.harper-adams.ac.uk/document/ki/key-info-page/Student-Engagement-Policy.pdf)
+
+These cover mitigating circumstances, extensions, late or missed assessment,
+reassessment, appeals, assessment rules, and relevant support routes. The manifest
+contains no private portal links, student records, or copied policy content. It records
+official URLs, titles, document types, version/date notes, and policy domains; the
+configured institution value is injected at load time.
+
+Load and index the reviewed corpus through the existing Stage 3/4 services after the
+database migration and configured embedding provider are ready:
+
+```powershell
+python -m backend.corpus.cli
+```
+
+The loader accepts credential-free HTTPS URLs only, rejects redirects and hosts not in
+`PRIMARY_INSTITUTION_SOURCE_HOSTS`, bounds each response by
+`MAX_DOCUMENT_SIZE_BYTES`, and then reuses `DocumentManager` and `IndexingService`.
+Consequently, PDF validation, SHA-256 deduplication, page-aware chunks, embedding
+validation, and atomic database writes are unchanged. Runtime download metadata
+(timestamp, content type, ETag/Last-Modified when supplied, catalogue URL, corpus ID,
+and policy domains) is stored in document metadata. Every indexed document's `source`
+is its official public URL, so generated citations resolve to the authoritative source.
+
+### Data-source tiers and authority
+
+The knowledge base keeps public guidance in two explicit, non-interchangeable tiers:
+
+- `primary` / `institution_policy`: official public documents from the configured
+  primary university. This is the default for retrieval and `/ask`.
+- `secondary` / `sector_guidance`: Discover Uni or other official UK
+  higher-education guidance used only as contextual guidance. A secondary document
+  must name its publisher in `institution`; it is never presented as the primary
+  university's rule.
+
+The tier, authority scope, publisher/institution, title, and official source URL are
+stored on each document, available as typed exact-match retrieval filters, and returned
+in retrieval metadata and every `/ask` citation. The grounded prompt carries the same
+labels and forbids promoting sector guidance to institution policy. When secondary
+evidence is requested, the answer also receives an explicit limitation explaining its
+contextual status. The current curated manifest is primary only; secondary sources must
+use a separately reviewed source list with explicit publisher metadata.
+
+Synthetic information is not an accepted policy-corpus tier. It is limited to
+non-production student profiles, case examples, calendars, and other private-record
+fixtures needed for tests or evaluation. No real student data is included or persisted.
+
+Unspecified API institution filters default to `PRIMARY_INSTITUTION_NAME`; callers can
+still provide another bounded institution value explicitly. `GET /api/v1/config/public`
+exposes only the safe display name, allowing Streamlit to label and prefill the current
+institution without receiving secrets or backend connection details.
 
 ## Stage 4 capabilities
 
@@ -129,6 +381,126 @@ The specialist roles are deliberately narrow:
 | Verifier | final typed artifacts and evidence references | fail-closed deterministic validation | no |
 
 There is no recursive planning, dynamic agent spawning, or open-ended agent chat.
+The coordinator may plan exactly once per request. While a specialist is active,
+nested dispatch—including self-dispatch—is rejected. Canonically hashed agent/input
+and agent/tool/input signatures prevent identical actions from being replayed.
+Retries occur only inside one bounded dispatch and cannot create another plan.
+The final verifier runs once and can only complete, escalate, or fail the request; it
+cannot restart the workflow.
+
+## Stage 7 evaluation provider
+
+Generation and evaluation use separate replaceable contracts:
+
+```text
+Primary generation provider
+    ├── OpenAI
+    └── Claude later
+
+Evaluation provider
+    └── GeminiEvaluationProvider
+         └── default model: gemini-3.1-flash-lite
+```
+
+`EvaluationProvider` owns the judge contract independently of `LLMProvider`.
+`GeminiEvaluationProvider` reads its provider, model, and secret from typed settings;
+the model identifier does not appear in provider logic. Changing the judge model
+requires only an `EVAL_MODEL` configuration change. Automated tests instantiate
+`MockEvaluationProvider`, which returns deterministic typed scores without network
+access or an API key.
+
+The evaluator returns bounded structured scores for groundedness, policy correctness,
+completeness, and escalation quality. Deterministic citation, deadline, approval,
+permission, and workflow checks remain authoritative and do not become judge calls.
+
+`safe_evaluator_trace_metadata` returns only the evaluator provider and model names.
+API keys, questions, answers, evidence, prompts, judge rationales, and raw evaluation
+payloads are excluded from this trace metadata boundary.
+
+### Stage 7 demo transcript
+
+> “An independent Gemini 3.1 Flash Lite judge evaluates groundedness, policy correctness, completeness, and escalation quality, while deterministic checks continue to validate citations and other rules that do not require an LLM judge.”
+
+For the current demo, the portal reads the primary institution name from FastAPI and
+retrieval defaults to that same configured institution. The name is not embedded in
+prompts, schemas, UI components, or evaluation logic.
+
+## Stage 7 Streamlit portal
+
+The Streamlit application is a separate, unprivileged HTTP client:
+
+```text
+Streamlit → FastAPI → baseline/agentic workflows → retrieval/tools/providers
+                                      └──────────→ safe Langfuse observations
+```
+
+It never imports backend services and receives no database, OpenAI, Gemini, or
+Langfuse credentials. `frontend/api_client.py` is the only frontend HTTP boundary;
+all pages use its timeout handling and safe error translation. Session state is
+temporary UI state, not durable conversation memory.
+
+The portal includes Ask for Support, Knowledge Base, Evidence Explorer, Agent
+Activity, Evaluation, and System pages. Citations expose only title, section, page,
+version, effective date, public source, and a bounded excerpt. Agent Activity exposes
+only safe milestones, names, counts, and terminal state.
+
+Run locally after starting FastAPI:
+
+```powershell
+$env:FASTAPI_BASE_URL="http://localhost:8000"
+streamlit run frontend/app.py
+```
+
+Open `http://localhost:8501`. Evaluation never runs automatically.
+
+## Langfuse Cloud EU observability
+
+Langfuse is optional and isolated behind `ObservabilityService`. Disabled or failed
+tracing degrades to `NoOpObservability`; it never fails `/ask`, retrieval, ingestion,
+or evaluation. `/health` remains a dependency-free liveness probe, and optional
+Langfuse/Gemini availability is not part of `/ready`.
+
+Set `LANGFUSE_ENABLED=true`, keep `LANGFUSE_HOST` on the EU endpoint
+`https://cloud.langfuse.com`, and set `LANGFUSE_PUBLIC_KEY` and
+`LANGFUSE_SECRET_KEY` only in your untracked `.env`. Placeholder values are maintained
+only in `.env.example`.
+
+The adapter correlates safe Langfuse trace IDs with existing request IDs and exports
+metadata-only events for request start, retrieval, agent milestones, verification,
+final response, and evaluation cases. Trace input/output is never populated.
+
+Tracing is fail-closed for content. A strict allowlist rejects questions, answers,
+documents, evidence bodies, prompts, sessions, credentials, connection strings,
+emails, phone-like/free-form values, student-ID-like values, and arbitrary fields
+before the Langfuse SDK sees them. Only identifiers, counts, latency/call metrics,
+provider/model names, confidence, outcome, and terminal state are permitted.
+
+## Reproducible evaluation suite
+
+`data/evaluation/stage7-policy-cases.jsonl` contains 36 synthetic, PII-free cases across
+the requested policy, ambiguity, security, citation, escalation, routing, and tool-use
+categories. Each selected workflow runs once per case with identical questions and
+indexed evidence. `EVAL_MAX_CASES_PER_RUN`, `EVAL_MAX_JUDGE_CALLS`, and
+`EVAL_TIMEOUT_SECONDS` are hard budgets; there are no recursive evaluations or
+automatic judge retries.
+
+`data/evaluation/primary-institution-validation.jsonl` adds seven representative,
+PII-free questions for extensions, late and missed assessment, reassessment, appeals,
+support, and fail-closed decision requests. It uses the existing typed evaluation-case
+contract and can be selected without code changes by setting
+`EVALUATION_DATASET_PATH` to that file before application startup. Automated tests
+continue to use mock generation/evaluation providers and never contact a live provider.
+
+Deterministic metrics remain separate from semantic judge scores: Recall@k,
+Precision@k, reciprocal rank/MRR, Hit Rate, citation validity, structured-output
+validity, escalation correctness, confidence calibration, agent routing, and tool
+selection. The judge scores groundedness, policy correctness, completeness,
+helpfulness, and escalation correctness using only the synthetic question, expected
+criteria, generated answer, bounded citation excerpts/metadata, and workflow mode.
+System prompts, hidden reasoning, credentials, full documents, and unrelated traces
+are excluded. Partial judge failure preserves deterministic results and cannot affect
+ordinary `/ask` requests. Comparison reports baseline wins and ties rather than
+assuming agentic is better.
 
 ## Why indexing is a separate step
 
@@ -169,13 +541,19 @@ To run the complete container stack, including migrations:
 docker compose up --build
 ```
 
-Compose waits for PostgreSQL readiness, runs `alembic upgrade head`, and starts the
-API. PostgreSQL data persists in the named `student-success-postgres` volume.
+Compose waits for PostgreSQL readiness, runs `alembic upgrade head`, starts FastAPI on
+`http://localhost:8000`, and starts Streamlit on `http://localhost:8501`. Streamlit
+receives only `FASTAPI_BASE_URL`; provider and persistence credentials remain in the
+API container. PostgreSQL data persists in the named `student-success-postgres` volume.
 
 ## Configuration
 
 | Variable | Default | Purpose |
 |---|---:|---|
+| `PRIMARY_INSTITUTION_NAME` | `Harper Adams University` | shared institution display, indexing, and default retrieval filter |
+| `PRIMARY_INSTITUTION_CORPUS_MANIFEST` | `data/institutions/primary-corpus.json` | reviewed official-source manifest |
+| `PRIMARY_INSTITUTION_SOURCE_HOSTS` | official default institution hosts | exact HTTPS download allowlist |
+| `CORPUS_DOWNLOAD_TIMEOUT_SECONDS` | `30` | timeout for each curated public PDF download |
 | `POSTGRES_PORT` | `5432` | host port published by the local Compose database |
 | `DATABASE_URL` | local PostgreSQL URL | SQLAlchemy PostgreSQL connection |
 | `DATABASE_POOL_SIZE` | `5` | persistent pooled connections |
@@ -201,6 +579,21 @@ API. PostgreSQL data persists in the named `student-success-postgres` volume.
 | `AGENT_TIMEOUT_SECONDS` | `20` | timeout for each specialist attempt |
 | `AGENT_MAX_RETRIES` | `1` | bounded specialist retries |
 | `AGENT_MAX_EVIDENCE_ITEMS` | `5` | maximum evidence items shared with specialists |
+| `AGENT_MAX_PROVIDER_CALLS` | `5` | hard total provider/model call budget per workflow |
+| `EVAL_PROVIDER` | `gemini` | independent Stage 7 evaluation provider |
+| `EVAL_MODEL` | `gemini-3.1-flash-lite` | configuration-selected LLM-as-judge model |
+| `GEMINI_API_KEY` | unset | secret used only by the Gemini evaluation provider |
+| `EVAL_MAX_CASES_PER_RUN` | `50` | hard maximum selected cases per evaluation |
+| `EVAL_MAX_JUDGE_CALLS` | `100` | hard total semantic-judge calls per run |
+| `EVAL_TIMEOUT_SECONDS` | `30` | per-workflow and per-judge timeout |
+| `EVALUATION_DATASET_PATH` | `data/evaluation/stage7-policy-cases.jsonl` | fixed synthetic dataset |
+| `LANGFUSE_ENABLED` | `false` | enable optional tracing |
+| `LANGFUSE_HOST` | `https://cloud.langfuse.com` | Langfuse Cloud EU endpoint |
+| `LANGFUSE_PUBLIC_KEY` | unset | Langfuse public credential, backend only |
+| `LANGFUSE_SECRET_KEY` | unset | Langfuse secret credential, backend only |
+| `LANGFUSE_EVENT_TIMEOUT_SECONDS` | `0.5` | hard non-blocking trace export budget |
+| `FASTAPI_BASE_URL` | `http://localhost:8000` | Streamlit-to-FastAPI URL |
+| `FRONTEND_MAX_UPLOAD_BYTES` | `10485760` | client-side PDF upload bound; backend revalidates |
 
 `text-embedding-3-small` normally uses 1536 dimensions in this project. If the
 configured provider/model emits a different size, set `EMBEDDING_DIMENSIONS` to the
@@ -272,6 +665,10 @@ every vector, then opens one transaction for the document and all chunks. Provid
 or database failures do not leave a partial document. Re-indexing identical bytes
 does not request embeddings again.
 
+The curated corpus command performs upload and indexing together. Manual indexing may
+omit `institution`; the API supplies `PRIMARY_INSTITUTION_NAME`. An explicit bounded
+institution remains supported for multi-institution deployments.
+
 ## Hybrid retrieval API
 
 `POST /api/v1/retrieval/search` accepts a non-empty query, `top_k` from 1–20,
@@ -302,8 +699,12 @@ normalized relative to the best candidate. `minimum_score` applies to the strong
 underlying evidence score. `prefer_recent` is an explicit effective-date tie-break;
 versions are never ordered lexically.
 
-Filters support exact `document_type`, `institution`, `source`, and `version`, plus
-explicit effective-date bounds. Older versions remain searchable unless filtered.
+Filters support exact `document_type`, `institution`, `source`, `version`,
+`corpus_tier`, and `authority_scope`, plus explicit effective-date bounds. Older
+versions remain searchable unless filtered. When filters are omitted at the HTTP
+boundary, the configured primary institution and `primary` / `institution_policy`
+classification are used. Selecting `secondary` requires `sector_guidance` and an
+explicit publisher filter; changing the primary institution requires configuration only.
 
 ## Grounded ask API
 
@@ -482,7 +883,8 @@ The normal Stage 5-compatible response fields are followed by safe workflow meta
     "requires_human_support": false,
     "duration_ms": 25.4,
     "provider_calls": 3,
-    "verification_passed": true
+    "verification_passed": true,
+    "terminal_state": "completed"
   }
 }
 ```
@@ -526,6 +928,9 @@ filesystem path, or arbitrary agent/tool name.
 - Coordinator, retrieval, provider, timeout, schema, tool, conflict, and verification
   failures fail closed to typed escalation responses. Unverified model text is never
   returned.
+- Every request ends irreversibly in `completed`, `escalated`, or `failed`. Repeated
+  failures consume the bounded retry/provider budgets and then fail closed; no agent,
+  tool, or verifier can restart the plan.
 
 ## Health and readiness
 
@@ -558,7 +963,8 @@ by the deployment environment.
 
 ## Tests and quality checks
 
-Normal tests use deterministic mock embeddings and never call OpenAI or Supabase:
+Normal tests use deterministic mock generation, embeddings, and
+`MockEvaluationProvider`; they never call OpenAI, Gemini, or Supabase:
 
 ```powershell
 pytest -m "not integration"
@@ -566,6 +972,13 @@ ruff check .
 ruff format --check .
 python -m compileall backend migrations tests
 docker compose config --quiet
+```
+
+Stage 7-specific checks:
+
+```powershell
+pytest tests/unit/frontend tests/unit/observability tests/unit/evaluation tests/unit/test_stage7_endpoints.py -q
+streamlit run frontend/app.py --server.headless=true
 ```
 
 Real PostgreSQL/pgvector integration tests are explicit:
@@ -601,7 +1014,7 @@ alembic upgrade head
 pytest -m integration -q
 ```
 
-## Current limitations and Stage 7 readiness
+## Current limitations and next-stage readiness
 
 - image-only PDFs still require a future OCR pipeline;
 - exact vector search is intended for the initial corpus, not millions of chunks;
@@ -612,11 +1025,7 @@ pytest -m integration -q
 - no application or appeal is submitted, approved, or automatically escalated;
 - the workflow does not diagnose conditions or provide legal advice.
 
-Stage 7 can put Streamlit over both explicit endpoints and use the returned workflow
-metadata for side-by-side latency, call-count, citation, confidence, and escalation
-views. Langfuse tracing can attach request IDs and the safe audit fields without
-recording prompts, evidence bodies, or student data. A deterministic eval suite can
-compare the two paths first; an optional LLM-as-judge can then score bounded,
-redacted outputs. The stable response contract and `workflow` metrics support trace
-comparison and baseline-vs-agentic benchmarking without changing either Stage 5 or
-Stage 6 execution semantics.
+Stage 8 can add authentication and authorization, PostgreSQL Row Level Security,
+explicit durable memory with retention/deletion controls, persistent audit records,
+rate limiting, backup/restore, CI security scanning, and production deployment
+hardening. Those controls are deliberately not simulated with insecure frontend state.

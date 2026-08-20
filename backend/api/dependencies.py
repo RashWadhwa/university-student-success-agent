@@ -6,10 +6,18 @@ from backend.agents.service import AgenticAskService
 from backend.ask.service import AskService
 from backend.core.exceptions import ServiceNotReadyError
 from backend.documents.manager import DocumentManager
+from backend.evaluation.runner import EvaluationRunner
 from backend.llm.base import LLMProvider
 from backend.llm.errors import LLMConfigurationError
+from backend.observability.base import ObservabilityService
 from backend.rag.indexing import IndexingService
 from backend.rag.retrieval import RetrievalService
+
+
+def get_primary_institution_name(request: Request) -> str:
+    """Return the safe configured institution name used by public workflows."""
+
+    return request.app.state.settings.primary_institution_name
 
 
 def get_llm_provider(request: Request) -> LLMProvider:
@@ -60,3 +68,17 @@ def get_agentic_ask_service(request: Request) -> AgenticAskService:
     if service is None:
         raise ServiceNotReadyError(details={"failed_checks": ["agentic_ask_service"]})
     return service
+
+
+def get_observability(request: Request) -> ObservabilityService:
+    service: ObservabilityService | None = getattr(request.app.state, "observability", None)
+    if service is None:
+        raise ServiceNotReadyError(details={"failed_checks": ["observability"]})
+    return service
+
+
+def get_evaluation_runner(request: Request) -> EvaluationRunner:
+    runner: EvaluationRunner | None = getattr(request.app.state, "evaluation_runner", None)
+    if runner is None:
+        raise ServiceNotReadyError(details={"failed_checks": ["evaluation"]})
+    return runner

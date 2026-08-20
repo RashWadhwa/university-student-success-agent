@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "student-success-agent"
-version = "0.6.0"
+version = "0.7.0"
 description = "Production-grade university student support agent"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -20,7 +20,12 @@ dependencies = [
     "asyncpg==0.31.0",
     "alembic==1.18.5",
     "pgvector==0.5.0",
+    "langfuse>=4.0,<5.0",
+    "streamlit>=1.40,<2.0",
 ]
+
+[project.scripts]
+load-primary-corpus = "backend.corpus.cli:main"
 
 [project.optional-dependencies]
 dev = [
@@ -31,10 +36,11 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["backend*"]
+include = ["backend*", "frontend*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 addopts = "-ra --strict-markers --cov=backend --cov-report=term-missing"
 markers = [
     "integration: requires local PostgreSQL with the pgvector extension",

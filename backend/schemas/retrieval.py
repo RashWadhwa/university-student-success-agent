@@ -4,7 +4,7 @@ from datetime import date
 
 from pydantic import Field, field_validator, model_validator
 
-from backend.rag.types import FusedRetrievalResult, SearchFilters
+from backend.rag.types import AuthorityScope, CorpusTier, FusedRetrievalResult, SearchFilters
 from backend.schemas.common import StrictModel
 
 
@@ -15,6 +15,18 @@ class RetrievalFilters(StrictModel):
     version: str | None = Field(default=None, min_length=1, max_length=100)
     effective_on_or_before: date | None = None
     effective_on_or_after: date | None = None
+    corpus_tier: CorpusTier | None = CorpusTier.PRIMARY
+    authority_scope: AuthorityScope | None = AuthorityScope.INSTITUTION_POLICY
+
+    @field_validator("institution")
+    @classmethod
+    def normalise_institution(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = " ".join(value.split())
+        if not cleaned:
+            raise ValueError("institution must not be blank")
+        return cleaned
 
     @model_validator(mode="after")
     def validate_date_range(self) -> "RetrievalFilters":
@@ -24,10 +36,23 @@ class RetrievalFilters(StrictModel):
             and self.effective_on_or_after > self.effective_on_or_before
         ):
             raise ValueError("effective date range is invalid")
+        allowed_pair = (
+            self.corpus_tier is CorpusTier.PRIMARY
+            and self.authority_scope is AuthorityScope.INSTITUTION_POLICY
+        ) or (
+            self.corpus_tier is CorpusTier.SECONDARY
+            and self.authority_scope is AuthorityScope.SECTOR_GUIDANCE
+        )
+        if not allowed_pair and not (self.corpus_tier is None and self.authority_scope is None):
+            raise ValueError("corpus tier and authority scope are inconsistent")
+        if self.corpus_tier is CorpusTier.SECONDARY and self.institution is None:
+            raise ValueError("secondary guidance requires an explicit publisher filter")
         return self
 
-    def to_domain(self) -> SearchFilters:
-        return SearchFilters(**self.model_dump())
+    def to_domain(self, *, default_institution: str | None = None) -> SearchFilters:
+        values = self.model_dump()
+        values["institution"] = self.institution or default_institution
+        return SearchFilters(**values)
 
 
 class RetrievalSearchRequest(StrictModel):
@@ -53,6 +78,8 @@ class RetrievalResultMetadata(StrictModel):
     effective_date: date | None = None
     review_date: date | None = None
     source: str | None = None
+    corpus_tier: CorpusTier
+    authority_scope: AuthorityScope
 
 
 class RetrievalResult(StrictModel):
@@ -99,6 +126,8 @@ class RetrievalSearchResponse(StrictModel):
                     effective_date=item.candidate.effective_date,
                     review_date=item.candidate.review_date,
                     source=item.candidate.source,
+                    corpus_tier=item.candidate.corpus_tier,
+                    authority_scope=item.candidate.authority_scope,
                 ),
             )
             for item in results

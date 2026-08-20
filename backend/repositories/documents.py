@@ -13,6 +13,8 @@ from sqlalchemy.orm import load_only
 from backend.database.models import ChunkModel, DocumentModel
 from backend.documents.models import DocumentRecord
 from backend.rag.types import (
+    AuthorityScope,
+    CorpusTier,
     DocumentIndexMetadata,
     RetrievalCandidate,
     SearchFilters,
@@ -53,11 +55,16 @@ class DocumentVectorRepository:
             review_date=metadata.review_date,
             version=metadata.version,
             source=metadata.source,
+            corpus_tier=metadata.corpus_tier.value,
+            authority_scope=metadata.authority_scope.value,
             mime_type=record.media_type,
             file_size_bytes=record.size_bytes,
             checksum=record.checksum_sha256,
             page_count=record.page_count,
-            extra_metadata=record.metadata,
+            extra_metadata={
+                **record.metadata,
+                "retrieval": dict(metadata.retrieval_metadata),
+            },
             created_at=record.created_at,
             indexed_at=indexed_at,
         )
@@ -140,6 +147,12 @@ class DocumentVectorRepository:
             statement = statement.where(DocumentModel.source == filters.source)
         if filters.version is not None:
             statement = statement.where(DocumentModel.version == filters.version)
+        if filters.corpus_tier is not None:
+            statement = statement.where(DocumentModel.corpus_tier == filters.corpus_tier.value)
+        if filters.authority_scope is not None:
+            statement = statement.where(
+                DocumentModel.authority_scope == filters.authority_scope.value
+            )
         if filters.effective_on_or_before is not None:
             statement = statement.where(
                 DocumentModel.effective_date <= filters.effective_on_or_before
@@ -171,6 +184,8 @@ class DocumentVectorRepository:
                 DocumentModel.effective_date,
                 DocumentModel.review_date,
                 DocumentModel.source,
+                DocumentModel.corpus_tier,
+                DocumentModel.authority_scope,
             ),
         )
 
@@ -194,4 +209,6 @@ class DocumentVectorRepository:
             review_date=document.review_date,
             source=document.source,
             score=max(0.0, min(1.0, score)),
+            corpus_tier=CorpusTier(document.corpus_tier),
+            authority_scope=AuthorityScope(document.authority_scope),
         )

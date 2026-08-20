@@ -14,9 +14,10 @@ from backend.agents.types import (
     ToolName,
     ToolPermission,
     WorkflowMode,
+    WorkflowStatus,
 )
 from backend.ask.types import Evidence
-from backend.rag.types import RetrievalSource
+from backend.rag.types import AuthorityScope, CorpusTier, RetrievalSource
 from backend.schemas.common import StrictModel
 from backend.schemas.retrieval import RetrievalFilters
 
@@ -84,6 +85,9 @@ class AgentEvidence(StrictModel):
     version: str | None = Field(default=None, max_length=100)
     effective_date: date | None = None
     source: str | None = Field(default=None, max_length=2048)
+    institution: str | None = Field(default=None, max_length=255)
+    corpus_tier: CorpusTier = CorpusTier.PRIMARY
+    authority_scope: AuthorityScope = AuthorityScope.INSTITUTION_POLICY
 
     @classmethod
     def from_domain(cls, item: Evidence, *, maximum_content_chars: int) -> AgentEvidence:
@@ -101,6 +105,9 @@ class AgentEvidence(StrictModel):
             version=item.version,
             effective_date=item.effective_date,
             source=item.source,
+            institution=item.institution,
+            corpus_tier=item.corpus_tier,
+            authority_scope=item.authority_scope,
         )
 
     def to_domain(self) -> Evidence:
@@ -118,6 +125,9 @@ class AgentEvidence(StrictModel):
             version=self.version,
             effective_date=self.effective_date,
             source=self.source,
+            institution=self.institution,
+            corpus_tier=self.corpus_tier,
+            authority_scope=self.authority_scope,
         )
 
 
@@ -253,3 +263,4 @@ class AgenticComparisonMetadata(StrictModel):
     duration_ms: float = Field(ge=0.0)
     provider_calls: int = Field(ge=0)
     verification_passed: bool
+    terminal_state: WorkflowStatus

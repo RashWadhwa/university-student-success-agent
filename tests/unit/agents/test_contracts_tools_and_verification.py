@@ -43,6 +43,7 @@ from backend.agents.types import (
     ToolPermission,
 )
 from backend.agents.verification import WorkflowVerifier
+from backend.core.config import Settings
 from backend.llm.base import GenerationOptions
 from backend.llm.providers.mock_provider import MockLLMProvider
 from backend.rag.types import FusedRetrievalResult, RetrievalCandidate
@@ -197,6 +198,39 @@ def test_schemas_reject_unknown_agent_and_unbounded_tool_arguments() -> None:
         SearchKnowledgeBaseInput(query="x", top_k=5, sql="DROP TABLE documents")
     with pytest.raises(ValidationError):
         DraftSupportEmailInput(purpose="Appeal", facts=["x" * 301])
+    with pytest.raises(ValidationError):
+        CoordinatorInput.model_validate(
+            {
+                "question": "Appeal question",
+                "top_k": 5,
+                "messages": [{"agent": "retrieval", "content": "keep chatting"}],
+            }
+        )
+    with pytest.raises(ValidationError):
+        ExecutionPlan(
+            intent="loop",
+            intents=[RequestIntent.ACADEMIC_APPEAL],
+            complexity=PlanComplexity.MULTI_STEP,
+            tasks=[
+                AgentTask(agent=AgentName.RETRIEVAL, objective="Repeat."),
+                AgentTask(agent=AgentName.RETRIEVAL, objective="Repeat."),
+            ],
+            use_baseline=False,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("agent_max_tasks", 11),
+        ("agent_max_tool_calls", 21),
+        ("agent_max_retries", 4),
+        ("agent_max_provider_calls", 21),
+    ],
+)
+def test_configured_agent_limits_have_hard_upper_bounds(field: str, value: int) -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, **{field: value})
 
 
 class FakeRetrieval:

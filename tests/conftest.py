@@ -9,7 +9,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from backend.core.config import Environment, LLMProviderName, Settings
+from backend.core.config import (
+    Environment,
+    EvaluationProviderName,
+    LLMProviderName,
+    Settings,
+)
 from backend.database.manager import DatabaseReadiness
 from backend.main import create_app
 
@@ -41,7 +46,9 @@ def test_settings(tmp_path: Path) -> Settings:
         log_level="CRITICAL",
         cors_origins=[],
         llm_provider=LLMProviderName.MOCK,
+        eval_provider=EvaluationProviderName.MOCK,
         document_storage_path=tmp_path / "documents",
+        evaluation_dataset_path=Path("data/evaluation/stage7-policy-cases.jsonl"),
         embedding_dimensions=8,
     )
 

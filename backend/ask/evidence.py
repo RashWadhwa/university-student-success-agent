@@ -80,6 +80,9 @@ def assess_evidence(
             version=item.candidate.version,
             effective_date=item.candidate.effective_date,
             source=item.candidate.source,
+            institution=item.candidate.institution,
+            corpus_tier=item.candidate.corpus_tier,
+            authority_scope=item.candidate.authority_scope,
         )
         for index, item in enumerate(selected, start=1)
     )
