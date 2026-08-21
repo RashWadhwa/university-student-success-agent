@@ -38,7 +38,9 @@ st.markdown(
 
 initialise_state()
 config = FrontendConfig.from_environment()
-client = StudentSuccessAPIClient(config)
+if "access_token" not in st.session_state:
+    st.session_state.access_token = ""
+client = StudentSuccessAPIClient(config, access_token=st.session_state.access_token or None)
 try:
     public_config = client.public_config()
     st.session_state.primary_institution_name = public_config["primary_institution_name"]
@@ -51,16 +53,36 @@ except Exception:
 with st.sidebar:
     st.title("Student Success")
     st.caption(f"Grounded policy guidance · {st.session_state.primary_institution_name}")
+    supplied_token = st.text_input(
+        "Access token",
+        type="password",
+        value=st.session_state.access_token,
+        help="A short-lived user access token. It is kept only in this browser session.",
+    )
+    if supplied_token != st.session_state.access_token:
+        st.session_state.access_token = supplied_token.strip()
+        st.rerun()
+    try:
+        identity = client.current_user()
+        role = identity.get("role", "student")
+        st.caption(f"Authenticated role: {role}")
+    except Exception:
+        role = "student"
+        st.caption("Authentication required for protected actions.")
+    available_pages = [
+        "Ask for Support",
+        "Evidence Explorer",
+        "Agent Activity",
+    ]
+    if role in {"staff", "admin"}:
+        available_pages.append("Knowledge Base")
+    if role == "admin":
+        available_pages.append("Evaluation")
+    if role in {"staff", "admin"}:
+        available_pages.append("System")
     page = st.radio(
         "Navigate",
-        [
-            "Ask for Support",
-            "Knowledge Base",
-            "Evidence Explorer",
-            "Agent Activity",
-            "Evaluation",
-            "System",
-        ],
+        available_pages,
         label_visibility="collapsed",
     )
     st.divider()

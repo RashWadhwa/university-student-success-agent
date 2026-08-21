@@ -34,13 +34,19 @@ services:
         condition: service_healthy
     environment:
       APP_NAME: ${APP_NAME:-University Student Success Agent}
-      APP_VERSION: ${APP_VERSION:-0.7.0}
+      APP_VERSION: ${APP_VERSION:-0.8.0}
       ENVIRONMENT: ${ENVIRONMENT:-development}
       DEBUG: ${DEBUG:-true}
       DOCS_ENABLED: ${DOCS_ENABLED:-true}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       API_V1_PREFIX: ${API_V1_PREFIX:-/api/v1}
       CORS_ORIGINS: '${CORS_ORIGINS:-["http://localhost:3000","http://localhost:8501"]}'
+      AUTH_MODE: ${AUTH_MODE:-local}
+      SUPABASE_AUTH_URL: ${SUPABASE_AUTH_URL:-}
+      SUPABASE_JWT_AUDIENCE: ${SUPABASE_JWT_AUDIENCE:-authenticated}
+      LOCAL_AUTH_ROLE: ${LOCAL_AUTH_ROLE:-admin}
+      DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-default}
+      RATE_LIMIT_SECRET: ${RATE_LIMIT_SECRET:-local-compose-rate-limit-key}
       PRIMARY_INSTITUTION_NAME: ${PRIMARY_INSTITUTION_NAME:-Harper Adams University}
       PRIMARY_INSTITUTION_CORPUS_MANIFEST: ${PRIMARY_INSTITUTION_CORPUS_MANIFEST:-/app/data/institutions/primary-corpus.json}
       PRIMARY_INSTITUTION_SOURCE_HOSTS: '${PRIMARY_INSTITUTION_SOURCE_HOSTS:-["www.harper-adams.ac.uk","cdn.harper-adams.ac.uk"]}'

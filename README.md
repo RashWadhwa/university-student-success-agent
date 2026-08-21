@@ -1,8 +1,9 @@
 # University Student Success Agent
 
-Stage 7 adds a provider-independent evaluation layer alongside the Stage 5 baseline
-and Stage 6 controlled multi-agent orchestration, plus an HTTP-only Streamlit portal
-and privacy-first Langfuse observability. Students can ask
+Stage 8 adds a production authentication boundary, capability authorization,
+PostgreSQL Row Level Security, consent-based semantic memory, persistent safe audit
+metadata, shared rate limits, CI security checks, and reproducible Render deployment
+to the Stage 1–7 application. Students can ask
 about assessment problems, missed deadlines, extensions, mitigating circumstances,
 reassessment, and academic appeals. Policy guidance is generated only from retrieved
 university evidence and is returned with verified page-level citations.
@@ -22,7 +23,8 @@ university policy, diagnose health conditions, or provide legal advice.
 ```mermaid
 flowchart TD
     UI["Streamlit portal"] --> API["FastAPI"]
-    API --> WF["Baseline / agentic workflow"]
+    API --> AU["Supabase JWT + capabilities"]
+    AU --> WF["Baseline / agentic workflow"]
     WF --> RAG["RAG services + authorised tools"]
     RAG --> DB["PostgreSQL + pgvector"]
     WF --> LLM["Generation provider<br/>OpenAI / Claude-ready"]
@@ -47,6 +49,7 @@ LangChain, external vector database, or search cluster.
 │   ├── evaluation/           # Versioned synthetic evaluation datasets
 │   └── institutions/         # Reviewed public-policy source manifests
 ├── docs/                     # Demo and operator-facing documentation
+├── .github/workflows/        # CI, security and container validation
 ├── migrations/               # Alembic environment and versioned schema changes
 ├── tests/
 │   ├── integration/          # Real PostgreSQL/pgvector workflow tests
@@ -58,6 +61,7 @@ LangChain, external vector database, or search cluster.
 ├── alembic.ini               # Alembic configuration
 ├── docker-compose.yml        # Local API, frontend, migration, and database stack
 ├── Dockerfile                # Application container image
+├── render.yaml               # Separate Render API/UI services and release migration
 ├── pyproject.toml            # Package, tooling, and test configuration
 ├── requirements.txt          # Runtime dependency list
 └── README.md
@@ -72,6 +76,8 @@ backend/
 │   ├── router.py             # Versioned route composition
 │   └── routes/               # Versioned endpoint modules and service probes
 ├── agents/                   # Bounded coordinator, specialists, tools, verifier
+├── audit/                    # Minimized persistent security audit service
+├── auth/                     # Supabase JWT validation and capabilities
 ├── ask/                      # Baseline grounded-answer workflow and verification
 ├── core/                     # Typed settings, logging, middleware, errors, context
 ├── corpus/                   # Reviewed official-source manifest loader and CLI
@@ -79,10 +85,12 @@ backend/
 ├── documents/                # PDF validation, extraction, chunking, ingestion records
 ├── evaluation/               # Provider-independent evaluation runner and metrics
 ├── llm/                      # Generation/embedding provider interface and adapters
+├── memory/                   # Consent, retention, supersession, and deletion policy
 ├── observability/            # Redaction, no-op tracing, and Langfuse adapter
 ├── rag/                      # Indexing, hybrid retrieval, fusion, retrieval metrics
 ├── repositories/             # Persistence and search query boundary
 ├── schemas/                  # Strict external Pydantic request/response contracts
+├── security/                 # Shared rate limiting and HTTP hardening
 └── main.py                   # FastAPI application factory and service wiring
 ```
 
@@ -202,6 +210,8 @@ questions, answers, evidence, prompts, rationales, secrets, or student data.
 ```text
 Dockerfile                     # Shared FastAPI/Streamlit application image
 docker-compose.yml             # Local PostgreSQL, migrations, API, and frontend
+render.yaml                    # Production Blueprint: release migration + two services
+.github/workflows/ci.yml       # Tests, scans, migrations, and image validation
 docker/postgres/init/
 └── 01-create-test-database.sql
 migrations/
@@ -209,7 +219,8 @@ migrations/
 ├── script.py.mako
 └── versions/
     ├── 20260820_0001_stage4_rag.py
-    └── 20260820_0002_source_classification.py
+    ├── 20260820_0002_source_classification.py
+    └── 20260821_0003_stage8_security.py
 alembic.ini
 .env.example                   # Placeholders only; .env remains untracked
 ```
@@ -219,7 +230,8 @@ alembic.ini
 ```mermaid
 flowchart TD
     US["User"] --> ST["Render Streamlit"]
-    ST -->|"HTTPS"| API["Render FastAPI"]
+    ST -->|"private HTTP / public HTTPS"| API["Render FastAPI"]
+    API --> AUTH["Supabase Auth<br/>JWKS verification"]
     API --> DB["Supabase PostgreSQL<br/>+ pgvector"]
     API --> GP["OpenAI / Claude-ready<br/>generation provider"]
     API --> EJ["Gemini evaluation judge"]
@@ -233,26 +245,25 @@ the FastAPI base URL and safe public configuration.
 
 ```mermaid
 flowchart TD
-    BR["Browser"] --> ST["Streamlit<br/>no DB credentials or LLM keys"]
-    ST --> API["FastAPI boundary<br/>validation now; authentication in Stage 8"]
+    BR["Browser"] --> ST["Streamlit<br/>short-lived user token only"]
+    ST --> API["FastAPI<br/>JWT + validation + capabilities"]
     API --> SV["Application services"]
-    SV --> PP["Public university-policy corpus"]
-    SV --> DB["PostgreSQL / pgvector"]
-    SV --> EX["External model providers"]
-    SV --> RD["PII redaction + metadata allowlist"]
+    SV --> PP["Public policy corpus"]
+    SV --> PR["Private memory/audit<br/>forced RLS"]
+    SV --> EX["Model providers"]
+    SV --> RD["PII redaction + allowlist"]
     RD --> LF["Langfuse EU"]
-    API -. "Stage 8" .-> PR["Private user/case data<br/>RLS protected"]
 ```
 
-- No database credentials, provider keys, or Langfuse secrets are exposed to the
-  browser or Streamlit container.
+- No database credentials, provider keys, Supabase service-role key, or Langfuse
+  secrets are exposed to the browser or Streamlit container.
 - Request fields cross strict Pydantic and application-validation boundaries before
   reaching services; user-controlled SQL and filter expressions are not accepted.
 - PII and sensitive content are rejected before Langfuse export.
-- The public university-policy corpus is classified and stored separately from future
-  private user or case data.
-- Stage 7 stores no persistent conversation or student data. Stage 8 will add user
-  authentication and PostgreSQL Row-Level Security for any private records it introduces.
+- The public university-policy corpus remains separate from private memory/audit data.
+- Private queries use a constrained PostgreSQL role plus transaction-local, validated
+  user/tenant/role context. Forced RLS is deny-by-default even if an application query
+  accidentally omits an owner predicate.
 
 ## Configurable primary-institution corpus
 
@@ -932,6 +943,88 @@ filesystem path, or arbitrary agent/tool name.
   failures consume the bounded retry/provider budgets and then fail closed; no agent,
   tool, or verifier can restart the plan.
 
+## Stage 8 authentication and authorization
+
+Production uses `AUTH_MODE=supabase`. FastAPI verifies each access token against the
+project's asymmetric JWKS and validates its signature, issuer, audience, expiry, issue
+time, and subject. Authorization data comes only from trusted `app_metadata`; mutable
+user metadata and request-body `user_id` values are never trusted. `student`, `staff`,
+and `admin` map to explicit capabilities enforced as FastAPI dependencies.
+
+Local identity is available only with the explicit `AUTH_MODE=local` setting and is
+rejected by production configuration validation. Streamlit may hold a short-lived user
+access token in its in-memory session, but receives no Supabase service-role/admin key.
+
+| Capability | Student | Staff | Admin |
+|---|:---:|:---:|:---:|
+| Public policy retrieval and support queries | yes | yes | yes |
+| Own semantic memory | yes | yes | yes |
+| Document management | no | yes | yes |
+| System status and tenant audit | no | yes | yes |
+| Evaluation runs | no | no | yes |
+
+## RLS and private-data flow
+
+```mermaid
+flowchart LR
+    JWT["Validated JWT"] --> PR["Principal"]
+    PR --> TX["SET LOCAL role/user/tenant"]
+    TX --> RLS["Forced RLS policies"]
+    RLS --> MEM["semantic_memory<br/>owner only"]
+    RLS --> AUD["audit_logs<br/>staff/admin tenant read"]
+```
+
+Migration `20260821_0003` creates the `NOLOGIN`, `NOBYPASSRLS`
+`student_success_app` role. Private services always use `private_session()`, which
+starts a transaction, assumes that constrained role, and sets validated identity with
+transaction-local PostgreSQL settings. Memory owners cannot read, update, or delete
+another user or tenant's rows. Staff/admin audit reads remain tenant-scoped. Public
+policy documents/chunks are intentionally shared and read-only to the constrained role.
+
+## Semantic memory, retention, and forgetting
+
+Memory is not a transcript store. It accepts a single bounded, distilled fact only
+after explicit consent and rejects dialogue-shaped content. It stores no prompts,
+answers, policy documents, embeddings, or arbitrary user identifiers.
+
+- Preferences, accessibility preferences, and institutional context default to 365
+  days; case summaries and ongoing actions default to 90 days.
+- Retrieval is relational and bounded by owner, type, active state, expiry, optional
+  case reference, recency, and a maximum of 50 rows. Memory is not dumped into every
+  model prompt; Stage 8 does not automatically inject it into generation.
+- Supersession deactivates an earlier fact. Expiry deactivates due facts. Users can
+  delete one memory, all memory, or a case-scoped subset through `/api/v1/memory`.
+- Case closure is represented by case-scoped deletion; temporary interaction state is
+  never promoted automatically.
+
+## Audit, rate limiting, and HTTP hardening
+
+Agent audit events are persisted with only request/user/tenant identifiers, event and
+agent/tool names, permission, decision, success, safe failure category, and timestamps.
+Raw questions, prompts, evidence, answers, memory facts, credentials, and hidden
+reasoning cannot be represented by the audit schema. Audit entries expire after 180
+days by default.
+
+Authenticated expensive routes use shared PostgreSQL fixed-window counters keyed by an
+HMAC pseudonym of the validated user ID. Ask, document, retrieval, evaluation, and
+memory buckets have separate configurable limits; a safe `429` reveals no counter or
+identity details. `X-Forwarded-For` is not used for identity or limit enforcement.
+Request bodies are bounded, production CORS must be an explicit allowlist, and responses
+carry nosniff, referrer, permissions, CSP, and production HSTS headers.
+
+## Production deployment and operations
+
+`render.yaml` defines two non-root Docker web services. FastAPI runs Alembic once with
+`alembic upgrade head` in Render's pre-deploy phase, then starts Uvicorn without reload.
+Streamlit receives only the private FastAPI host/port and safe UI timeouts. Render uses
+`/health` for process liveness; `/ready` remains the operator-visible database/provider
+readiness probe and does not control restarts.
+
+Runtime database access remains SQLAlchemy → `DATABASE_URL` → Supabase PostgreSQL and
+pgvector. Supabase management access tokens/project references are deployment tooling,
+not application runtime credentials. See [Render deployment](docs/deployment-render.md),
+[backup and restore](docs/backup-restore.md), and [post-deploy smoke tests](docs/smoke-test.md).
+
 ## Health and readiness
 
 - `GET /health` is process liveness only. It never checks PostgreSQL, Supabase,
@@ -1021,11 +1114,13 @@ pytest -m integration -q
 - freshness is metadata filtering/tie-breaking, not automatic policy supersession;
 - scope classification and claim checks are deterministic rather than a full semantic
   policy classifier or sentence-level NLI system;
-- `session_id` is accepted for forward compatibility but no durable memory is stored;
+- `session_id` remains non-durable; only explicit, consented, distilled facts enter the
+  separate semantic-memory store;
 - no application or appeal is submitted, approved, or automatically escalated;
 - the workflow does not diagnose conditions or provide legal advice.
 
-Stage 8 can add authentication and authorization, PostgreSQL Row Level Security,
-explicit durable memory with retention/deletion controls, persistent audit records,
-rate limiting, backup/restore, CI security scanning, and production deployment
-hardening. Those controls are deliberately not simulated with insecure frontend state.
+Before a live launch, operators must create/configure the Supabase project and Auth
+claims hook, provision Render secret environment values, approve CORS origins, review
+retention with the institution's data owner, exercise restore into staging, and complete
+the documented smoke test. OCR, automated case-system integration, and automatic
+memory-to-prompt injection remain intentionally out of scope.

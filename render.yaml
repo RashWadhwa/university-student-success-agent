@@ -1,0 +1,78 @@
+services:
+  - type: web
+    name: student-success-api
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    preDeployCommand: alembic upgrade head
+    healthCheckPath: /health
+    maxShutdownDelaySeconds: 30
+    disk:
+      name: policy-documents
+      mountPath: /app/data/documents
+      sizeGB: 1
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: APP_VERSION
+        value: 0.8.0
+      - key: DEBUG
+        value: "false"
+      - key: DOCS_ENABLED
+        value: "false"
+      - key: AUTH_MODE
+        value: supabase
+      - key: SUPABASE_AUTH_URL
+        sync: false
+      - key: SUPABASE_JWT_AUDIENCE
+        value: authenticated
+      - key: DATABASE_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: RATE_LIMIT_SECRET
+        generateValue: true
+      - key: DOCUMENT_STORAGE_PATH
+        value: /app/data/documents
+      - key: PRIMARY_INSTITUTION_NAME
+        value: Harper Adams University
+      - key: LLM_PROVIDER
+        value: openai
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: EVAL_PROVIDER
+        value: gemini
+      - key: EVAL_MODEL
+        value: gemini-3.1-flash-lite
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: LANGFUSE_ENABLED
+        value: "true"
+      - key: LANGFUSE_HOST
+        value: https://cloud.langfuse.com
+      - key: LANGFUSE_PUBLIC_KEY
+        sync: false
+      - key: LANGFUSE_SECRET_KEY
+        sync: false
+
+  - type: web
+    name: student-success-frontend
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: streamlit run frontend/app.py --server.address=0.0.0.0 --server.port=$PORT --server.headless=true --browser.gatherUsageStats=false
+    healthCheckPath: /_stcore/health
+    maxShutdownDelaySeconds: 30
+    envVars:
+      - key: FASTAPI_BASE_URL
+        fromService:
+          type: web
+          name: student-success-api
+          property: hostport
+      - key: FRONTEND_REQUEST_TIMEOUT_SECONDS
+        value: "30"
+      - key: FRONTEND_MAX_UPLOAD_BYTES
+        value: "10485760"

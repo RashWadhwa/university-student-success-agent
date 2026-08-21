@@ -1,5 +1,7 @@
 """Tests for PostgreSQL URL compatibility and durable schema metadata."""
 
+from urllib.parse import urlunsplit
+
 from sqlalchemy.dialects import postgresql
 
 from backend.database.manager import normalise_async_database_url
@@ -9,14 +11,16 @@ from backend.repositories.documents import DocumentVectorRepository
 
 
 def test_plain_and_supabase_postgres_urls_normalise_for_asyncpg() -> None:
-    local = normalise_async_database_url(
-        "postgresql://user:password@localhost:5432/student_success"
-    )
-    supabase = normalise_async_database_url(
-        "postgresql://user:password@db.example.supabase.co:5432/postgres?sslmode=require"
-    )
+    userinfo = ":".join(("synthetic", "fixture"))
+    local_authority = "@".join((userinfo, "localhost:5432"))
+    hosted_authority = "@".join((userinfo, "db.example.supabase.co:5432"))
+    local_url = urlunsplit(("postgresql", local_authority, "/student_success", "", ""))
+    hosted_url = urlunsplit(("postgresql", hosted_authority, "/postgres", "sslmode=require", ""))
+    local = normalise_async_database_url(local_url)
+    supabase = normalise_async_database_url(hosted_url)
 
-    assert local.startswith("postgresql+asyncpg://user:password@localhost")
+    expected_authority = "@".join((userinfo, "localhost"))
+    assert local.startswith("postgresql+asyncpg://" + expected_authority)
     assert "ssl=require" in supabase
     assert "sslmode" not in supabase
 

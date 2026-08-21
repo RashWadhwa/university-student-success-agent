@@ -35,9 +35,11 @@ class StudentSuccessAPIClient:
         config: FrontendConfig,
         *,
         client: httpx.Client | None = None,
+        access_token: str | None = None,
     ) -> None:
         self.config = config
         self._owns_client = client is None
+        self._access_token = access_token
         self._client = client or httpx.Client(
             base_url=config.api_base_url,
             timeout=httpx.Timeout(config.request_timeout_seconds, connect=5.0),
@@ -55,6 +57,9 @@ class StudentSuccessAPIClient:
 
     def public_config(self) -> dict[str, Any]:
         return self._request("GET", "/api/v1/config/public", retry_read=True)
+
+    def current_user(self) -> dict[str, Any]:
+        return self._request("GET", "/api/v1/auth/me", retry_read=True)
 
     def ask(
         self,
@@ -122,6 +127,10 @@ class StudentSuccessAPIClient:
             self._client.close()
 
     def _request(self, method: str, path: str, *, retry_read: bool = False, **kwargs: Any) -> Any:
+        if self._access_token:
+            headers = dict(kwargs.pop("headers", {}))
+            headers["Authorization"] = f"Bearer {self._access_token}"
+            kwargs["headers"] = headers
         attempts = 2 if retry_read and method == "GET" else 1
         response: httpx.Response | None = None
         try:

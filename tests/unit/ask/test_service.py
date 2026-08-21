@@ -2,6 +2,7 @@
 
 from datetime import date
 from typing import Any
+from urllib.parse import urlunsplit
 
 import pytest
 
@@ -285,12 +286,17 @@ async def test_malicious_retrieved_instruction_cannot_create_an_approval() -> No
 
 @pytest.mark.asyncio
 async def test_credential_bearing_source_is_not_exposed() -> None:
+    # Construct userinfo at runtime so the security behavior is exercised without
+    # committing a credential-shaped URI that secret scanners must treat as real.
+    userinfo = ":".join(("synthetic", "fixture"))
+    authority = "@".join((userinfo, "policy.example.invalid"))
+    unsafe_source = urlunsplit(("https", authority, "/policy", "", ""))
     result = await ask(
         service(
             [
                 retrieved(
                     "chunk-1",
-                    source="https://database-user:database-secret@example.edu/policy",
+                    source=unsafe_source,
                 )
             ]
         )

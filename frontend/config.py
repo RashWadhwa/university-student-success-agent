@@ -14,6 +14,9 @@ class FrontendConfig:
     @classmethod
     def from_environment(cls) -> "FrontendConfig":
         base_url = os.getenv("FASTAPI_BASE_URL", "http://localhost:8000").rstrip("/")
+        if "://" not in base_url:
+            # Render's fromService.hostport is a private-network host:port value.
+            base_url = f"http://{base_url}"
         parsed = urlsplit(base_url)
         if (
             parsed.scheme not in {"http", "https"}

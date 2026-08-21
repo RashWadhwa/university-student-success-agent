@@ -11,7 +11,11 @@ from backend.api.dependencies import (
     get_observability,
     get_primary_institution_name,
 )
+from backend.api.routes.audit import get_audit_service
 from backend.ask.service import AskService
+from backend.audit.service import AuditService
+from backend.auth.dependencies import get_current_principal
+from backend.auth.models import Principal
 from backend.core.context import get_request_id
 from backend.observability.base import ObservabilityService
 from backend.observability.events import record_ask_result, record_ask_started
@@ -27,6 +31,8 @@ async def ask(
     service: Annotated[AskService, Depends(get_ask_service)],
     observability: Annotated[ObservabilityService, Depends(get_observability)],
     primary_institution: Annotated[str, Depends(get_primary_institution_name)],
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    audit: Annotated[AuditService, Depends(get_audit_service)],
 ) -> AskResponse:
     await record_ask_started(
         observability,
@@ -41,6 +47,13 @@ async def ask(
         session_id=request.session_id,
     )
     trace_id = await record_ask_result(observability, result)
+    await audit.record(
+        principal,
+        request_id=get_request_id(),
+        event_type="baseline_workflow_completed",
+        decision=result.outcome.value,
+        success=result.outcome.value == "answered",
+    )
     return AskResponse.from_result(result).model_copy(update={"trace_id": trace_id})
 
 
@@ -58,6 +71,8 @@ async def ask_agentic(
     service: Annotated[AgenticAskService, Depends(get_agentic_ask_service)],
     observability: Annotated[ObservabilityService, Depends(get_observability)],
     primary_institution: Annotated[str, Depends(get_primary_institution_name)],
+    principal: Annotated[Principal, Depends(get_current_principal)],
+    audit: Annotated[AuditService, Depends(get_audit_service)],
 ) -> AgenticAskResponse:
     await record_ask_started(
         observability,
@@ -72,4 +87,5 @@ async def ask_agentic(
         session_id=request.session_id,
     )
     trace_id = await record_ask_result(observability, result)
+    await audit.record_agent_events(principal, result.audit_events)
     return AgenticAskResponse.from_result(result).model_copy(update={"trace_id": trace_id})

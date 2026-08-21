@@ -80,6 +80,7 @@ class AgenticAskResult:
     duration_ms: float
     verification_passed: bool
     terminal_state: WorkflowStatus
+    audit_events: tuple[AgentAuditEvent, ...] = ()
 
 
 @dataclass(slots=True)

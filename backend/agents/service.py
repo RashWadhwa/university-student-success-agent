@@ -179,6 +179,7 @@ class AgenticAskService:
                 duration_ms=(perf_counter() - started) * 1000,
                 verification_passed=baseline_result.citation_verification_passed,
                 terminal_state=state.status,
+                audit_events=tuple(state.audit_events),
             )
 
         plan = decision.plan
@@ -482,6 +483,7 @@ class AgenticAskService:
             duration_ms=duration,
             verification_passed=result.citation_verification_passed,
             terminal_state=state.status,
+            audit_events=tuple(state.audit_events),
         )
 
     def _safe_failure(

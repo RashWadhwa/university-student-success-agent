@@ -7,6 +7,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
@@ -19,6 +20,9 @@ from sqlalchemy.ext.asyncio import (
 )
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from backend.auth.models import Principal
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +79,26 @@ class DatabaseManager:
         """Yield one session; callers explicitly own transaction boundaries."""
 
         async with self.session_factory() as session:
+            yield session
+
+    @asynccontextmanager
+    async def private_session(self, principal: Principal) -> AsyncIterator[AsyncSession]:
+        """Yield a transaction with a constrained DB role and RLS identity."""
+
+        async with self.session_factory() as session, session.begin():
+            await session.execute(text("SET LOCAL ROLE student_success_app"))
+            await session.execute(
+                text("SELECT set_config('app.user_id', :value, true)"),
+                {"value": str(principal.user_id)},
+            )
+            await session.execute(
+                text("SELECT set_config('app.tenant_id', :value, true)"),
+                {"value": principal.tenant_id},
+            )
+            await session.execute(
+                text("SELECT set_config('app.role', :value, true)"),
+                {"value": principal.role.value},
+            )
             yield session
 
     async def check_readiness(self) -> DatabaseReadiness:

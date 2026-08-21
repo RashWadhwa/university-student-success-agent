@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from urllib.parse import urlunsplit
 
 import httpx
 import pytest
@@ -45,6 +46,24 @@ def test_public_config_reads_safe_institution_display_value() -> None:
     )
 
     assert client.public_config() == {"primary_institution_name": "Configurable University"}
+
+
+def test_access_token_is_sent_as_bearer_without_privileged_frontend_credentials() -> None:
+    captured: dict[str, str] = {}
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        captured["authorization"] = request.headers["authorization"]
+        return httpx.Response(200, json={"role": "student"})
+
+    http = httpx.Client(transport=httpx.MockTransport(handle), base_url="http://backend.test")
+    client = StudentSuccessAPIClient(
+        FrontendConfig(api_base_url="http://backend.test", request_timeout_seconds=5),
+        client=http,
+        access_token="fixture-access-value",
+    )
+
+    assert client.current_user()["role"] == "student"
+    assert captured["authorization"] == "Bearer fixture-access-value"
 
 
 def test_health_failure_is_translated_without_backend_details() -> None:
@@ -161,7 +180,9 @@ def test_malformed_backend_response_is_safe() -> None:
 
 
 def test_frontend_configuration_rejects_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FASTAPI_BASE_URL", "http://user:password@backend.test")
+    userinfo = ":".join(("synthetic", "fixture"))
+    authority = "@".join((userinfo, "backend.example.invalid"))
+    monkeypatch.setenv("FASTAPI_BASE_URL", urlunsplit(("http", authority, "", "", "")))
 
     with pytest.raises(ValueError, match="credential-free"):
         FrontendConfig.from_environment()

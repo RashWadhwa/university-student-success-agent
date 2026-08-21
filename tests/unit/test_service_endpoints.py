@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from backend.core.config import Environment, LLMProviderName, Settings
 from backend.database.manager import DatabaseReadiness
 from backend.main import create_app
+from tests.conftest import ReadyDatabaseManager
 
 
 def test_root_describes_service(client: TestClient) -> None:
@@ -22,6 +23,39 @@ def test_root_describes_service(client: TestClient) -> None:
     assert body["documentation_url"].endswith("/docs")
 
 
+def test_local_authenticated_context_is_explicit_and_capability_bounded(
+    client: TestClient,
+) -> None:
+    response = client.get("/api/v1/auth/me")
+
+    assert response.status_code == 200
+    assert response.json()["role"] == "admin"
+    assert "evaluation:run" in response.json()["capabilities"]
+
+
+def test_student_is_denied_document_management(tmp_path: Path) -> None:
+    settings = Settings(
+        _env_file=None,
+        environment=Environment.TESTING,
+        llm_provider=LLMProviderName.MOCK,
+        eval_provider="mock",
+        local_auth_role="student",
+        embedding_dimensions=8,
+        document_storage_path=tmp_path / "documents",
+        cors_origins=[],
+    )
+    student_app = create_app(settings, database_manager=ReadyDatabaseManager())
+
+    with TestClient(student_app) as test_client:
+        response = test_client.post(
+            "/api/v1/documents",
+            files={"file": ("policy.pdf", b"%PDF-1.4", "application/pdf")},
+        )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "INSUFFICIENT_PERMISSION"
+
+
 def test_health_reports_liveness(client: TestClient) -> None:
     response = client.get("/health")
 
@@ -30,6 +64,8 @@ def test_health_reports_liveness(client: TestClient) -> None:
     assert body["status"] == "ok"
     assert body["service"] == "Student Success Agent Test"
     assert body["uptime_seconds"] >= 0
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["referrer-policy"] == "no-referrer"
 
 
 def test_health_does_not_depend_on_readiness_dependencies(
@@ -139,6 +175,42 @@ def test_not_found_uses_error_envelope(client: TestClient) -> None:
     body = response.json()
     assert body["error"]["code"] == "HTTP_ERROR"
     assert body["request_id"] == response.headers["x-request-id"]
+
+
+def test_oversized_request_is_rejected_safely(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/ask",
+        content=b"x" * (13 * 1024 * 1024),
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "REQUEST_TOO_LARGE"
+    assert "traceback" not in response.text.casefold()
+
+
+def test_rate_limit_response_is_safe_and_forwarded_header_cannot_bypass(
+    app: FastAPI,
+    client: TestClient,
+) -> None:
+    class DenyLimiter:
+        async def allow(self, *, identity: str, bucket: str, limit: int) -> bool:
+            del identity, bucket, limit
+            return False
+
+    app.state.rate_limit_service = DenyLimiter()
+    response = client.post(
+        "/api/v1/ask",
+        headers={"X-Forwarded-For": "198.51.100.10"},
+        json={"question": "How do extensions work?", "filters": {}},
+    )
+
+    assert response.status_code == 429
+    assert response.json()["error"] == {
+        "code": "RATE_LIMITED",
+        "message": "Too many requests. Please try again later.",
+    }
+    assert "198.51.100.10" not in response.text
 
 
 def test_unhandled_error_uses_error_envelope(

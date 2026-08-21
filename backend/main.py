@@ -20,6 +20,8 @@ from backend.agents.tools import build_tool_executor
 from backend.agents.verification import WorkflowVerifier
 from backend.api.router import service_router, v1_router
 from backend.ask.service import AskService
+from backend.audit.service import AuditService
+from backend.auth.service import AuthenticationService
 from backend.core.config import Settings, get_settings
 from backend.core.exceptions import register_exception_handlers
 from backend.core.logging import configure_logging
@@ -34,10 +36,13 @@ from backend.evaluation.runner import EvaluationRunner
 from backend.llm.base import LLMProvider
 from backend.llm.errors import LLMConfigurationError
 from backend.llm.factory import create_llm_provider
+from backend.memory.service import MemoryService
 from backend.observability.base import ObservabilityService
 from backend.observability.factory import create_observability
 from backend.rag.indexing import IndexingService
 from backend.rag.retrieval import RetrievalService
+from backend.security.middleware import SecurityMiddleware
+from backend.security.rate_limit import RateLimitService
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +77,16 @@ def create_app(
             max_overflow=resolved_settings.database_max_overflow,
             pool_timeout=resolved_settings.database_pool_timeout,
             readiness_timeout=resolved_settings.database_readiness_timeout,
+        )
+        app.state.auth_service = AuthenticationService(resolved_settings)
+        app.state.memory_service = MemoryService(app.state.database_manager, resolved_settings)
+        app.state.audit_service = AuditService(
+            app.state.database_manager,
+            retention_days=resolved_settings.audit_retention_days,
+            enabled=resolved_settings.environment.value != "testing",
+        )
+        app.state.rate_limit_service = RateLimitService(
+            app.state.database_manager, resolved_settings
         )
         app.state.indexing_service = None
         app.state.retrieval_service = None
@@ -209,6 +224,9 @@ def create_app(
             app.state.retrieval_service = None
             app.state.ask_service = None
             app.state.agentic_ask_service = None
+            app.state.memory_service = None
+            app.state.audit_service = None
+            app.state.rate_limit_service = None
             app.state.evaluation_runner = None
             try:
                 try:
@@ -223,6 +241,8 @@ def create_app(
                     await app.state.observability.close()
                     app.state.observability = None
                 finally:
+                    await app.state.auth_service.close()
+                    app.state.auth_service = None
                     await app.state.database_manager.close()
                     app.state.database_manager = None
             logger.info("Application stopped")
@@ -255,6 +275,10 @@ def create_app(
     app.state.retrieval_service = None
     app.state.ask_service = None
     app.state.agentic_ask_service = None
+    app.state.auth_service = None
+    app.state.memory_service = None
+    app.state.audit_service = None
+    app.state.rate_limit_service = None
 
     if resolved_settings.cors_origins:
         app.add_middleware(
@@ -266,6 +290,11 @@ def create_app(
             expose_headers=["X-Request-ID"],
         )
 
+    app.add_middleware(
+        SecurityMiddleware,
+        maximum_body_bytes=resolved_settings.request_body_max_bytes,
+        production=resolved_settings.is_production,
+    )
     app.add_middleware(RequestContextMiddleware)
     register_exception_handlers(app)
     app.include_router(service_router)

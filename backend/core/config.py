@@ -5,6 +5,7 @@ from functools import lru_cache
 from ipaddress import ip_address
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -33,6 +34,13 @@ class EvaluationProviderName(StrEnum):
     MOCK = "mock"
 
 
+class AuthMode(StrEnum):
+    """Supported authentication boundaries."""
+
+    LOCAL = "local"
+    SUPABASE = "supabase"
+
+
 class Settings(BaseSettings):
     """Application settings loaded from environment variables or ``.env``."""
 
@@ -48,7 +56,7 @@ class Settings(BaseSettings):
         default="University Student Success Agent",
         validation_alias="APP_NAME",
     )
-    app_version: str = Field(default="0.7.0", validation_alias="APP_VERSION")
+    app_version: str = Field(default="0.8.0", validation_alias="APP_VERSION")
     environment: Environment = Field(
         default=Environment.DEVELOPMENT,
         validation_alias="ENVIRONMENT",
@@ -66,6 +74,55 @@ class Settings(BaseSettings):
             "http://localhost:8501",
         ],
         validation_alias="CORS_ORIGINS",
+    )
+    auth_mode: AuthMode = Field(default=AuthMode.LOCAL, validation_alias="AUTH_MODE")
+    supabase_auth_url: str | None = Field(default=None, validation_alias="SUPABASE_AUTH_URL")
+    supabase_jwt_audience: str = Field(
+        default="authenticated", validation_alias="SUPABASE_JWT_AUDIENCE", min_length=1
+    )
+    auth_jwks_cache_seconds: int = Field(
+        default=600, validation_alias="AUTH_JWKS_CACHE_SECONDS", ge=30, le=1200
+    )
+    local_auth_role: Literal["student", "staff", "admin"] = Field(
+        default="admin", validation_alias="LOCAL_AUTH_ROLE"
+    )
+    default_tenant_id: str = Field(
+        default="default",
+        validation_alias="DEFAULT_TENANT_ID",
+        pattern=r"^[A-Za-z0-9._:-]{1,100}$",
+    )
+    request_body_max_bytes: int = Field(
+        default=12 * 1024 * 1024,
+        validation_alias="REQUEST_BODY_MAX_BYTES",
+        ge=1024,
+        le=110 * 1024 * 1024,
+    )
+    rate_limit_secret: SecretStr | None = Field(default=None, validation_alias="RATE_LIMIT_SECRET")
+    rate_limit_window_seconds: int = Field(
+        default=60, validation_alias="RATE_LIMIT_WINDOW_SECONDS", ge=10, le=3600
+    )
+    rate_limit_ask: int = Field(default=20, validation_alias="RATE_LIMIT_ASK", ge=1, le=1000)
+    rate_limit_documents: int = Field(
+        default=10, validation_alias="RATE_LIMIT_DOCUMENTS", ge=1, le=1000
+    )
+    rate_limit_retrieval: int = Field(
+        default=30, validation_alias="RATE_LIMIT_RETRIEVAL", ge=1, le=1000
+    )
+    rate_limit_evaluation: int = Field(
+        default=2, validation_alias="RATE_LIMIT_EVALUATION", ge=1, le=100
+    )
+    rate_limit_memory: int = Field(default=20, validation_alias="RATE_LIMIT_MEMORY", ge=1, le=1000)
+    memory_max_fact_chars: int = Field(
+        default=1000, validation_alias="MEMORY_MAX_FACT_CHARS", ge=50, le=2000
+    )
+    memory_preference_retention_days: int = Field(
+        default=365, validation_alias="MEMORY_PREFERENCE_RETENTION_DAYS", ge=1, le=730
+    )
+    memory_case_retention_days: int = Field(
+        default=90, validation_alias="MEMORY_CASE_RETENTION_DAYS", ge=1, le=365
+    )
+    audit_retention_days: int = Field(
+        default=180, validation_alias="AUDIT_RETENTION_DAYS", ge=30, le=730
     )
     primary_institution_name: str = Field(
         default="Harper Adams University",
@@ -416,6 +473,50 @@ class Settings(BaseSettings):
             cleaned = cleaned.rstrip("/")
         return cleaned
 
+    @field_validator("cors_origins")
+    @classmethod
+    def validate_cors_origins(cls, values: list[str]) -> list[str]:
+        origins: list[str] = []
+        for value in values:
+            candidate = value.strip().rstrip("/")
+            parsed = urlsplit(candidate)
+            if (
+                parsed.scheme not in {"http", "https"}
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.path
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError("CORS_ORIGINS must contain credential-free HTTP(S) origins")
+            if candidate not in origins:
+                origins.append(candidate)
+        return origins
+
+    @field_validator("supabase_auth_url")
+    @classmethod
+    def validate_supabase_auth_url(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        candidate = value.strip().rstrip("/")
+        parsed = urlsplit(candidate)
+        is_local_http = parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1"}
+        if (
+            (parsed.scheme != "https" and not is_local_http)
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or not parsed.path.endswith("/auth/v1")
+        ):
+            raise ValueError(
+                "SUPABASE_AUTH_URL must be a credential-free /auth/v1 URL; "
+                "HTTP is allowed only for localhost"
+            )
+        return candidate
+
     @field_validator(
         "openai_api_key",
         "openai_organization",
@@ -424,6 +525,8 @@ class Settings(BaseSettings):
         "gemini_api_key",
         "langfuse_public_key",
         "langfuse_secret_key",
+        "supabase_auth_url",
+        "rate_limit_secret",
         mode="before",
     )
     @classmethod
@@ -451,6 +554,22 @@ class Settings(BaseSettings):
                 raise ValueError("Langfuse keys are required when LANGFUSE_ENABLED is true")
             if self.langfuse_host.rstrip("/") != "https://cloud.langfuse.com":
                 raise ValueError("LANGFUSE_HOST must use the Langfuse Cloud EU endpoint")
+        if self.environment in {Environment.STAGING, Environment.PRODUCTION}:
+            if self.auth_mode is not AuthMode.SUPABASE:
+                raise ValueError("AUTH_MODE must be supabase outside local/test environments")
+            if self.supabase_auth_url is None:
+                raise ValueError("SUPABASE_AUTH_URL is required outside local/test environments")
+            if self.rate_limit_secret is None:
+                raise ValueError("RATE_LIMIT_SECRET is required outside local/test environments")
+        if self.is_production:
+            if not self.cors_origins:
+                raise ValueError("CORS_ORIGINS must explicitly allow the production frontend")
+            if "*" in self.cors_origins:
+                raise ValueError("CORS_ORIGINS cannot contain '*' in production")
+            if any(urlsplit(origin).scheme != "https" for origin in self.cors_origins):
+                raise ValueError("CORS_ORIGINS must use HTTPS in production")
+            if self.supabase_auth_url and urlsplit(self.supabase_auth_url).scheme != "https":
+                raise ValueError("SUPABASE_AUTH_URL must use HTTPS in production")
         return self
 
     @property

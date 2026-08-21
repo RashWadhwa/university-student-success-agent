@@ -51,6 +51,10 @@ _FORBIDDEN_FRAGMENTS = (
     "api_key",
     "database_url",
     "connection",
+    "memory",
+    "tenant",
+    "user_id",
+    "audit",
 )
 
 

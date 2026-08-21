@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -121,3 +122,84 @@ class ChunkModel(Base):
     )
 
     document: Mapped[DocumentModel] = relationship(back_populates="chunks")
+
+
+class SemanticMemoryModel(Base):
+    """Consent-based distilled user memory, separate from RAG and audit data."""
+
+    __tablename__ = "semantic_memory"
+    __table_args__ = (
+        CheckConstraint(
+            "memory_type IN ('preference','case_summary','ongoing_action',"
+            "'accessibility_preference','institutional_context')",
+            name="ck_semantic_memory_type",
+        ),
+        CheckConstraint("char_length(fact) BETWEEN 1 AND 2000", name="ck_memory_fact_length"),
+        CheckConstraint("confidence >= 0 AND confidence <= 1", name="ck_memory_confidence"),
+        Index("ix_memory_owner_active", "tenant_id", "user_id", "is_active"),
+        Index("ix_memory_expires_at", "expires_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        "memory_id", PGUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    user_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    tenant_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    memory_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    fact: Mapped[str] = mapped_column(Text, nullable=False)
+    source_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    source_reference: Mapped[str | None] = mapped_column(String(255))
+    confidence: Mapped[float] = mapped_column(nullable=False)
+    consent_scope: Mapped[str] = mapped_column(String(50), nullable=False)
+    retention_category: Mapped[str] = mapped_column(String(50), nullable=False)
+    case_reference: Mapped[str | None] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    superseded_by: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+class AuditLogModel(Base):
+    """Minimised persistent security audit metadata."""
+
+    __tablename__ = "audit_logs"
+    __table_args__ = (
+        Index("ix_audit_tenant_created", "tenant_id", "created_at"),
+        Index("ix_audit_request", "request_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        "audit_id", PGUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    request_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    user_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    tenant_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    agent_name: Mapped[str | None] = mapped_column(String(50))
+    tool_name: Mapped[str | None] = mapped_column(String(100))
+    permission_level: Mapped[str | None] = mapped_column(String(30))
+    decision: Mapped[str | None] = mapped_column(String(100))
+    success: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    failure_category: Mapped[str | None] = mapped_column(String(100))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class RateLimitModel(Base):
+    """Shared fixed-window counters keyed by a pseudonymous identity."""
+
+    __tablename__ = "rate_limit_counters"
+    __table_args__ = (Index("ix_rate_limit_expires_at", "expires_at"),)
+
+    identity_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    route_bucket: Mapped[str] = mapped_column(String(50), primary_key=True)
+    window_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    request_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

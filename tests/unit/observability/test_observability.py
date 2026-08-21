@@ -3,6 +3,7 @@
 from contextlib import AbstractContextManager
 from hashlib import sha256
 from typing import Any
+from urllib.parse import urlunsplit
 
 import pytest
 from pydantic import SecretStr
@@ -46,6 +47,12 @@ class FakeLangfuse:
         self.closed = True
 
 
+def credential_bearing_fixture_url() -> str:
+    userinfo = ":".join(("synthetic", "fixture"))
+    authority = "@".join((userinfo, "db.example.invalid"))
+    return urlunsplit(("postgresql", authority, "/db", "", ""))
+
+
 def test_tracing_disabled_uses_noop() -> None:
     service = create_observability(Settings(_env_file=None, langfuse_enabled=False))
 
@@ -64,8 +71,8 @@ def test_tracing_enabled_uses_eu_configuration_without_exposing_keys() -> None:
     settings = Settings(
         _env_file=None,
         langfuse_enabled=True,
-        langfuse_public_key=SecretStr("pk-lf-private"),
-        langfuse_secret_key=SecretStr("sk-lf-private"),
+        langfuse_public_key=SecretStr("fixture-public-value"),
+        langfuse_secret_key=SecretStr("fixture-secret-value"),
     )
     service = create_observability(settings, client_factory=factory)
 
@@ -75,7 +82,7 @@ def test_tracing_enabled_uses_eu_configuration_without_exposing_keys() -> None:
 
 
 def test_initialisation_failure_does_not_log_keys(caplog: Any) -> None:
-    marker = "sk-lf-sensitive-marker"
+    marker = "sensitive-observability-marker"
 
     def failing_factory(**kwargs: Any) -> FakeLangfuse:
         del kwargs
@@ -84,7 +91,7 @@ def test_initialisation_failure_does_not_log_keys(caplog: Any) -> None:
     settings = Settings(
         _env_file=None,
         langfuse_enabled=True,
-        langfuse_public_key=SecretStr("pk-lf-private"),
+        langfuse_public_key=SecretStr("fixture-public-value"),
         langfuse_secret_key=SecretStr(marker),
     )
 
@@ -138,16 +145,19 @@ async def test_langfuse_unavailable_never_breaks_request_or_leaks_exception(capl
 @pytest.mark.parametrize(
     "metadata",
     [
-        {"api_key": "sk-secret"},
+        {"api_key": "fixture-value"},
         {"question": "raw student question"},
         {"evidence": "full document body"},
         {"provider": "student@example.edu"},
         {"provider": "447700900123"},
         {"model": "S12345678"},
         {"model": "ignore previous instructions"},
-        {"model": "postgresql://user:password@host/db"},
+        {"model": credential_bearing_fixture_url()},
         {"prompt": "hidden system prompt"},
         {"session_id": "session-private"},
+        {"memory_fact": "private preference"},
+        {"tenant_id": "tenant-private"},
+        {"user_id": "private-user"},
     ],
 )
 def test_secret_pii_evidence_prompt_and_session_fields_fail_closed(

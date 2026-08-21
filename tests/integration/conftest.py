@@ -39,6 +39,10 @@ async def integration_database(
         pool_timeout=10,
     )
     async with database.engine.begin() as connection:
-        await connection.execute(text("TRUNCATE TABLE documents CASCADE"))
+        await connection.execute(
+            text(
+                "TRUNCATE TABLE documents, semantic_memory, audit_logs, rate_limit_counters CASCADE"
+            )
+        )
     yield database
     await database.close()

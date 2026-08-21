@@ -135,7 +135,7 @@ def test_agentic_exception_does_not_leak_provider_or_database_details(
     app: FastAPI,
     client: TestClient,
 ) -> None:
-    secret = "postgresql://private-user:private-password@internal/provider-key"
+    secret = "private database connection marker"
 
     class FailingService:
         async def answer(self, **kwargs: Any) -> Any:

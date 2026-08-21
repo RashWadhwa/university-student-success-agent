@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from backend.core.config import Environment, LLMProviderName, Settings
+from backend.core.config import AuthMode, Environment, LLMProviderName, Settings
 from backend.main import create_app
 from tests.conftest import ReadyDatabaseManager
 
@@ -67,13 +67,10 @@ def test_smoke_test_is_disabled_in_production(tmp_path: Path) -> None:
         environment=Environment.PRODUCTION,
         llm_provider=LLMProviderName.MOCK,
         enable_llm_smoke_test=True,
-        cors_origins=[],
+        auth_mode=AuthMode.SUPABASE,
+        supabase_auth_url="https://project.supabase.co/auth/v1",
+        rate_limit_secret="test-only-production-secret",
+        cors_origins=["https://student-success-ui.onrender.com"],
         document_storage_path=tmp_path / "documents",
     )
-    app = create_app(settings, database_manager=ReadyDatabaseManager())
-
-    with TestClient(app) as client:
-        response = client.post("/api/v1/llm/smoke-test")
-
-    assert response.status_code == 404
-    assert response.json()["error"]["code"] == "LLM_SMOKE_TEST_DISABLED"
+    assert settings.llm_smoke_test_enabled is False

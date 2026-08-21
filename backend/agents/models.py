@@ -228,13 +228,13 @@ class VerificationOutput(StrictModel):
 class AgentAuditEvent(StrictModel):
     request_id: str = Field(min_length=1, max_length=128)
     agent_name: AgentName
-    event_type: str = Field(min_length=1, max_length=100)
+    event_type: str = Field(pattern=r"^[a-z][a-z0-9_:-]{0,99}$")
     tool_name: ToolName | None = None
     permission_level: ToolPermission | None = None
-    decision: str | None = Field(default=None, max_length=100)
+    decision: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_:-]{0,99}$")
     duration_ms: float = Field(default=0.0, ge=0.0)
     success: bool
-    failure_category: str | None = Field(default=None, max_length=100)
+    failure_category: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_:-]{0,99}$")
 
 
 class ToolInvocationRecord(StrictModel):
