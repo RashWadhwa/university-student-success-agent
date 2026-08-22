@@ -289,7 +289,7 @@ class Settings(BaseSettings):
     )
     database_url: SecretStr = Field(
         default=SecretStr(
-            "postgresql+asyncpg://student_success:student_success@localhost:5432/student_success"
+            "postgresql+asyncpg://student_success:NewLocalPassword2026@localhost:55432/student_success"
         ),
         validation_alias="DATABASE_URL",
         min_length=1,
