@@ -15,7 +15,7 @@ from frontend.pages import (
 from frontend.state import initialise_state
 
 st.set_page_config(
-    page_title="Student Success Portal",
+    page_title="University Student Success Assistant",
     page_icon="🎓",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -24,12 +24,17 @@ st.markdown(
     """
     <style>
       :root { --university-navy: #17324d; --university-gold: #d8a72d; }
-      .stApp { background: linear-gradient(180deg, #f7f9fc 0%, #ffffff 45%); }
-      h1, h2, h3 { color: var(--university-navy); }
+      .stApp { background: var(--background-color); }
+      [data-testid="stAppViewContainer"] h1,
+      [data-testid="stAppViewContainer"] h2,
+      [data-testid="stAppViewContainer"] h3,
+      .app-subtitle { color: var(--text-color); }
+      .app-subtitle { font-size: 1.1rem; line-height: 1.6; margin: -0.5rem 0 1.75rem; }
       [data-testid="stSidebar"] { background: #17324d; }
       [data-testid="stSidebar"] * { color: #f8fafc; }
       .stButton > button[kind="primary"] { background: #17324d; border-color: #17324d; }
-      div[data-testid="stMetric"] { background: #ffffff; border: 1px solid #dbe4ee;
+      div[data-testid="stMetric"] { background: var(--secondary-background-color);
+        border: 1px solid color-mix(in srgb, var(--text-color) 18%, transparent);
         border-radius: 12px; padding: 12px; }
     </style>
     """,
@@ -70,16 +75,16 @@ with st.sidebar:
         role = "student"
         st.caption("Authentication required for protected actions.")
     available_pages = [
-        "Ask for Support",
+        "Student Support",
         "Evidence Explorer",
-        "Agent Activity",
+        "Agent Workflow",
     ]
     if role in {"staff", "admin"}:
         available_pages.append("Knowledge Base")
     if role == "admin":
-        available_pages.append("Evaluation")
+        available_pages.append("Evaluation Centre")
     if role in {"staff", "admin"}:
-        available_pages.append("System")
+        available_pages.append("System Health")
     page = st.radio(
         "Navigate",
         available_pages,
@@ -88,12 +93,19 @@ with st.sidebar:
     st.divider()
     st.caption("This service provides guidance, not university decisions or legal advice.")
 
+st.title("University Student Success Assistant")
+st.markdown(
+    '<p class="app-subtitle">Grounded guidance from verified university policies, with '
+    "transparent evidence and human escalation when needed.</p>",
+    unsafe_allow_html=True,
+)
+
 pages = {
-    "Ask for Support": ask_support.render,
+    "Student Support": ask_support.render,
     "Knowledge Base": knowledge_base.render,
     "Evidence Explorer": evidence_explorer.render,
-    "Agent Activity": agent_activity.render,
-    "Evaluation": evaluation.render,
-    "System": system.render,
+    "Agent Workflow": agent_activity.render,
+    "Evaluation Centre": evaluation.render,
+    "System Health": system.render,
 }
 pages[page](client)

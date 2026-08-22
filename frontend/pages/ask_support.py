@@ -19,17 +19,20 @@ _TOPICS = {
 
 
 def render(client: StudentSuccessAPIClient) -> None:
-    st.title("Ask for student support")
+    st.header("Student Support")
+    st.subheader("How can we help?")
     st.write(
         "Get grounded guidance from the "
         f"{st.session_state.primary_institution_name} policy knowledge base."
     )
     st.caption("Choose a topic or write your own question. Do not include sensitive personal data.")
+    st.subheader("Choose a support topic")
     columns = st.columns(5)
     for column, (label, question) in zip(columns, _TOPICS.items(), strict=True):
         if column.button(label, use_container_width=True):
             st.session_state.current_question = question
 
+    st.subheader("Ask your question")
     with st.form("ask-support"):
         question = st.text_area(
             "Your question",
@@ -38,6 +41,7 @@ def render(client: StudentSuccessAPIClient) -> None:
             height=150,
             placeholder="Ask about extensions, missed assessments, reassessment, or appeals…",
         )
+        st.subheader("Choose support mode")
         mode = st.segmented_control(
             "Support mode",
             options=["Baseline", "Agentic"],

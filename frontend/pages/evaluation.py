@@ -7,7 +7,7 @@ from frontend.components.metrics import render_evaluation_summaries
 
 
 def render(client: StudentSuccessAPIClient) -> None:
-    st.title("Evaluation")
+    st.header("Evaluation Centre")
     st.write("Compare baseline and agentic workflows on the same synthetic policy cases.")
     try:
         datasets = client.evaluation_datasets().get("datasets", [])

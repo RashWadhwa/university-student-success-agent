@@ -8,7 +8,7 @@ from frontend.api_client import FrontendAPIError, StudentSuccessAPIClient
 
 
 def render(client: StudentSuccessAPIClient) -> None:
-    st.title("Knowledge Base")
+    st.header("Knowledge Base")
     st.write("Upload a text-based university policy PDF and index it for grounded retrieval.")
     upload = st.file_uploader("Policy PDF", type=["pdf"], accept_multiple_files=False)
     with st.expander("Optional policy metadata"):

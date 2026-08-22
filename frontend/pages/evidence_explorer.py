@@ -6,7 +6,7 @@ from frontend.api_client import FrontendAPIError, StudentSuccessAPIClient
 
 
 def render(client: StudentSuccessAPIClient) -> None:
-    st.title("Evidence Explorer")
+    st.header("Evidence Explorer")
     st.write(
         "Inspect citation-ready hybrid retrieval results for "
         f"{st.session_state.primary_institution_name} without embeddings or raw SQL."

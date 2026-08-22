@@ -8,11 +8,11 @@ from frontend.components.workflow import render_workflow
 
 def render(client: StudentSuccessAPIClient) -> None:
     del client
-    st.title("Agent Activity")
+    st.header("Agent Workflow")
     st.write("Review safe workflow milestones for the latest agentic request.")
     response = st.session_state.get("last_response")
     if not response:
-        st.info("Submit an agentic question on Ask for Support first.")
+        st.info("Submit an agentic question in Student Support first.")
         return
     render_workflow(response)
     workflow = response.get("workflow")

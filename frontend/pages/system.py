@@ -7,7 +7,7 @@ from frontend.components.status import render_status_grid
 
 
 def render(client: StudentSuccessAPIClient) -> None:
-    st.title("System")
+    st.header("System Health")
     st.write("Safe operational status without credentials, connection strings, or raw exceptions.")
     try:
         health = client.health()
