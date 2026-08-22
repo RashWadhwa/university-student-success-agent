@@ -8,6 +8,7 @@ from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from backend.core.config import get_settings
 from backend.database import models  # noqa: F401
 from backend.database.base import Base
 from backend.database.manager import normalise_async_database_url
@@ -20,7 +21,9 @@ target_metadata = Base.metadata
 
 
 def database_url() -> str:
-    configured = os.environ.get("DATABASE_URL") or config.get_main_option("sqlalchemy.url")
+    """Resolve the same DATABASE_URL FastAPI uses: shell env, then .env via Settings."""
+
+    configured = os.environ.get("DATABASE_URL") or get_settings().database_url.get_secret_value()
     return normalise_async_database_url(configured)
 
 
