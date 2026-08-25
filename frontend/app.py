@@ -1,18 +1,28 @@
 """University Student Success Portal Streamlit entry point."""
 
+import contextlib
+
 import streamlit as st
 
-from frontend.api_client import StudentSuccessAPIClient
+from frontend.api_client import FrontendAPIError, StudentSuccessAPIClient
 from frontend.config import FrontendConfig
-from frontend.pages import (
+from frontend.state import (
+    clear_session,
+    current_display_name,
+    current_role,
+    initialise_state,
+    is_authenticated,
+    set_session,
+)
+from frontend.views import (
     agent_activity,
     ask_support,
+    auth,
     evaluation,
     evidence_explorer,
     knowledge_base,
     system,
 )
-from frontend.state import initialise_state
 
 st.set_page_config(
     page_title="University Student Success Assistant",
@@ -43,9 +53,9 @@ st.markdown(
 
 initialise_state()
 config = FrontendConfig.from_environment()
-if "access_token" not in st.session_state:
-    st.session_state.access_token = ""
-client = StudentSuccessAPIClient(config, access_token=st.session_state.access_token or None)
+auth.handle_recovery_link_query_params()
+
+client = StudentSuccessAPIClient(config, access_token=st.session_state.access_token)
 try:
     public_config = client.public_config()
     st.session_state.primary_institution_name = public_config["primary_institution_name"]
@@ -55,25 +65,45 @@ except Exception:
     # The page remains usable if the safe configuration endpoint is temporarily unavailable.
     pass
 
+if not is_authenticated():
+    with st.sidebar:
+        st.title("Student Success")
+        st.caption(f"Grounded policy guidance · {st.session_state.primary_institution_name}")
+        st.divider()
+        st.caption("This service provides guidance, not university decisions or legal advice.")
+    auth.render_auth_gate(client, config)
+    st.stop()
+
+try:
+    identity = client.current_user()
+except FrontendAPIError as exc:
+    if exc.status_code != 401:
+        # Backend temporarily unreachable/erroring: keep the session, just report it.
+        st.error(exc.safe_message)
+        st.stop()
+    refresh_token = st.session_state.refresh_token
+    if refresh_token:
+        try:
+            refreshed = client.refresh_session(refresh_token=refresh_token)
+        except FrontendAPIError:
+            clear_session(notice="Your session has expired. Please sign in again.")
+        else:
+            set_session(refreshed)
+        st.rerun()
+    else:
+        clear_session(notice="Your session has expired. Please sign in again.")
+        st.rerun()
+else:
+    role = identity.get("role", current_role() or "student")
+
 with st.sidebar:
     st.title("Student Success")
     st.caption(f"Grounded policy guidance · {st.session_state.primary_institution_name}")
-    supplied_token = st.text_input(
-        "Access token",
-        type="password",
-        value=st.session_state.access_token,
-        help="A short-lived user access token. It is kept only in this browser session.",
-    )
-    if supplied_token != st.session_state.access_token:
-        st.session_state.access_token = supplied_token.strip()
-        st.rerun()
-    try:
-        identity = client.current_user()
-        role = identity.get("role", "student")
-        st.caption(f"Authenticated role: {role}")
-    except Exception:
-        role = "student"
-        st.caption("Authentication required for protected actions.")
+    st.caption("Signed in as")
+    st.markdown(f"**{current_display_name()}**")
+    st.caption("Role")
+    st.markdown(f"**{role.capitalize()}**")
+
     available_pages = [
         "Student Support",
         "Evidence Explorer",
@@ -90,6 +120,13 @@ with st.sidebar:
         available_pages,
         label_visibility="collapsed",
     )
+
+    st.divider()
+    if st.button("Sign out", use_container_width=True):
+        with contextlib.suppress(FrontendAPIError):
+            client.logout()
+        clear_session()
+        st.rerun()
     st.divider()
     st.caption("This service provides guidance, not university decisions or legal advice.")
 

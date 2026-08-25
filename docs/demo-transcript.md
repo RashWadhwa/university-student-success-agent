@@ -63,9 +63,29 @@ FastAPI alone connects to Supabase Auth/PostgreSQL/pgvector, generation provider
 Gemini judge, and Langfuse EU. Render runs Alembic once before deployment, `/health`
 remains dependency-free, and secrets remain server-side.
 
+## Authentication
+
+“The application now uses real Supabase authentication behind the FastAPI API layer.
+Users register and sign in without ever handling access tokens directly. Identity is
+mapped to a server-controlled role, allowing the application to enforce separate
+student, staff and administrator permissions at both the API and database layers.”
+
+“I am initially signed in using the student demonstration account. Notice that
+administrative capabilities are not available — Knowledge Base, Evaluation Centre, and
+System Health are simply not in the navigation. I will sign out and authenticate using
+the administrator account. The same application now exposes Knowledge Base management,
+evaluation tooling, and system health controls, because authorization is enforced using
+the authenticated role — not a page-visibility toggle in the browser.”
+
+“Password recovery and email verification are handled through the authentication
+provider, while credentials, access tokens, and recovery secrets are excluded from
+application logs and observability traces.”
+
 ## Live demo
 
-1. Authenticate with a synthetic Supabase student and show the server-returned role.
+1. On the login screen, sign in with the student demonstration account (or register a
+   new account live) and show the authenticated sidebar reflecting the server-returned
+   name and role — no manual token entry anywhere.
 2. Open **Ask for Support**, point out that the institution label came from safe public
    backend configuration, select “Missed Assessment,” and choose Agentic mode.
 3. Show the grounded answer, next actions, confidence, limitations, and human-support
@@ -79,10 +99,13 @@ remains dependency-free, and secrets remain server-side.
 7. Show the request ID, persistent safe audit metadata, and privacy-safe Langfuse trace
    correlation; no question, answer, evidence, or memory value is present.
 8. Open **Evidence Explorer** to inspect hybrid retrieval without embeddings or SQL.
-9. As an admin, open **Evaluation**, select Both, and explicitly run the synthetic dataset. Compare
-   groundedness, citation accuracy, policy correctness, escalation accuracy, latency,
-   provider calls, and tool calls. The result reports baseline wins and ties.
-10. Open **System** to show safe component status, rate-limit behavior, and readiness
+9. Sign out and sign back in with the admin demonstration account. Point out that
+   **Knowledge Base**, **Evaluation Centre**, and **System Health** now appear in the
+   sidebar — the same frontend build, a different server-enforced role.
+10. As an admin, open **Evaluation**, select Both, and explicitly run the synthetic dataset. Compare
+    groundedness, citation accuracy, policy correctness, escalation accuracy, latency,
+    provider calls, and tool calls. The result reports baseline wins and ties.
+11. Open **System** to show safe component status, rate-limit behavior, and readiness
     without credentials or raw errors.
 
 ## Evaluation narration

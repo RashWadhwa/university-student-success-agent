@@ -23,9 +23,12 @@ _SAFE_MESSAGES = {
 
 
 class FrontendAPIError(RuntimeError):
-    def __init__(self, message: str, *, request_id: str | None = None) -> None:
+    def __init__(
+        self, message: str, *, status_code: int | None = None, request_id: str | None = None
+    ) -> None:
         super().__init__(message)
         self.safe_message = message
+        self.status_code = status_code
         self.request_id = request_id
 
 
@@ -60,6 +63,70 @@ class StudentSuccessAPIClient:
 
     def current_user(self) -> dict[str, Any]:
         return self._request("GET", "/api/v1/auth/me", retry_read=True)
+
+    def register(
+        self, *, display_name: str, email: str, password: str, confirm_password: str
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/api/v1/auth/register",
+            json={
+                "display_name": display_name,
+                "email": email,
+                "password": password,
+                "confirm_password": confirm_password,
+            },
+            prefer_backend_message=True,
+        )
+
+    def login(self, *, email: str, password: str) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/api/v1/auth/login",
+            json={"email": email, "password": password},
+            prefer_backend_message=True,
+        )
+
+    def demo_login(self, *, demo_role: str) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/api/v1/auth/demo-login",
+            json={"demo_role": demo_role},
+            prefer_backend_message=True,
+        )
+
+    def refresh_session(self, *, refresh_token: str) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/api/v1/auth/refresh",
+            json={"refresh_token": refresh_token},
+            prefer_backend_message=True,
+        )
+
+    def logout(self) -> dict[str, Any]:
+        return self._request("POST", "/api/v1/auth/logout", prefer_backend_message=True)
+
+    def forgot_password(self, *, email: str) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/api/v1/auth/forgot-password",
+            json={"email": email},
+            prefer_backend_message=True,
+        )
+
+    def reset_password(
+        self, *, token_hash: str, new_password: str, confirm_password: str
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/api/v1/auth/reset-password",
+            json={
+                "token_hash": token_hash,
+                "new_password": new_password,
+                "confirm_password": confirm_password,
+            },
+            prefer_backend_message=True,
+        )
 
     def ask(
         self,
@@ -126,7 +193,15 @@ class StudentSuccessAPIClient:
         if self._owns_client:
             self._client.close()
 
-    def _request(self, method: str, path: str, *, retry_read: bool = False, **kwargs: Any) -> Any:
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        retry_read: bool = False,
+        prefer_backend_message: bool = False,
+        **kwargs: Any,
+    ) -> Any:
         if self._access_token:
             headers = dict(kwargs.pop("headers", {}))
             headers["Authorization"] = f"Bearer {self._access_token}"
@@ -149,7 +224,17 @@ class StudentSuccessAPIClient:
                     response.status_code,
                     "The request could not be completed safely.",
                 )
-                raise FrontendAPIError(message, request_id=request_id)
+                if prefer_backend_message:
+                    try:
+                        backend_message = response.json()["error"]["message"]
+                    except (ValueError, KeyError, TypeError):
+                        pass
+                    else:
+                        if isinstance(backend_message, str) and backend_message:
+                            message = backend_message
+                raise FrontendAPIError(
+                    message, status_code=response.status_code, request_id=request_id
+                )
             payload = response.json()
             if not isinstance(payload, dict):
                 raise FrontendAPIError("The backend returned an unexpected response.")

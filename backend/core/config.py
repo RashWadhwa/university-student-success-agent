@@ -80,6 +80,23 @@ class Settings(BaseSettings):
     supabase_jwt_audience: str = Field(
         default="authenticated", validation_alias="SUPABASE_JWT_AUDIENCE", min_length=1
     )
+    supabase_anon_key: SecretStr | None = Field(default=None, validation_alias="SUPABASE_ANON_KEY")
+    supabase_service_role_key: SecretStr | None = Field(
+        default=None, validation_alias="SUPABASE_SERVICE_ROLE_KEY"
+    )
+    enable_demo_auth: bool = Field(default=False, validation_alias="ENABLE_DEMO_AUTH")
+    demo_student_email: str | None = Field(default=None, validation_alias="DEMO_STUDENT_EMAIL")
+    demo_student_password: SecretStr | None = Field(
+        default=None, validation_alias="DEMO_STUDENT_PASSWORD"
+    )
+    demo_staff_email: str | None = Field(default=None, validation_alias="DEMO_STAFF_EMAIL")
+    demo_staff_password: SecretStr | None = Field(
+        default=None, validation_alias="DEMO_STAFF_PASSWORD"
+    )
+    demo_admin_email: str | None = Field(default=None, validation_alias="DEMO_ADMIN_EMAIL")
+    demo_admin_password: SecretStr | None = Field(
+        default=None, validation_alias="DEMO_ADMIN_PASSWORD"
+    )
     auth_jwks_cache_seconds: int = Field(
         default=600, validation_alias="AUTH_JWKS_CACHE_SECONDS", ge=30, le=1200
     )
@@ -112,6 +129,18 @@ class Settings(BaseSettings):
         default=2, validation_alias="RATE_LIMIT_EVALUATION", ge=1, le=100
     )
     rate_limit_memory: int = Field(default=20, validation_alias="RATE_LIMIT_MEMORY", ge=1, le=1000)
+    rate_limit_auth_login: int = Field(
+        default=10, validation_alias="RATE_LIMIT_AUTH_LOGIN", ge=1, le=1000
+    )
+    rate_limit_auth_register: int = Field(
+        default=5, validation_alias="RATE_LIMIT_AUTH_REGISTER", ge=1, le=1000
+    )
+    rate_limit_auth_refresh: int = Field(
+        default=30, validation_alias="RATE_LIMIT_AUTH_REFRESH", ge=1, le=1000
+    )
+    rate_limit_auth_password_reset: int = Field(
+        default=5, validation_alias="RATE_LIMIT_AUTH_PASSWORD_RESET", ge=1, le=1000
+    )
     memory_max_fact_chars: int = Field(
         default=1000, validation_alias="MEMORY_MAX_FACT_CHARS", ge=50, le=2000
     )
@@ -526,6 +555,14 @@ class Settings(BaseSettings):
         "langfuse_public_key",
         "langfuse_secret_key",
         "supabase_auth_url",
+        "supabase_anon_key",
+        "supabase_service_role_key",
+        "demo_student_email",
+        "demo_student_password",
+        "demo_staff_email",
+        "demo_staff_password",
+        "demo_admin_email",
+        "demo_admin_password",
         "rate_limit_secret",
         mode="before",
     )
@@ -562,6 +599,8 @@ class Settings(BaseSettings):
             if self.rate_limit_secret is None:
                 raise ValueError("RATE_LIMIT_SECRET is required outside local/test environments")
         if self.is_production:
+            if self.enable_demo_auth:
+                raise ValueError("ENABLE_DEMO_AUTH must be false in production")
             if not self.cors_origins:
                 raise ValueError("CORS_ORIGINS must explicitly allow the production frontend")
             if "*" in self.cors_origins:

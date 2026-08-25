@@ -21,7 +21,9 @@ from backend.agents.verification import WorkflowVerifier
 from backend.api.router import service_router, v1_router
 from backend.ask.service import AskService
 from backend.audit.service import AuditService
+from backend.auth.identity_service import IdentityService
 from backend.auth.service import AuthenticationService
+from backend.auth.supabase_provider import SupabaseAuthProvider
 from backend.core.config import Settings, get_settings
 from backend.core.exceptions import register_exception_handlers
 from backend.core.logging import configure_logging
@@ -85,6 +87,24 @@ def create_app(
             retention_days=resolved_settings.audit_retention_days,
             enabled=resolved_settings.environment.value != "testing",
         )
+        app.state.identity_service = None
+        if (
+            resolved_settings.supabase_auth_url is not None
+            and resolved_settings.supabase_anon_key is not None
+        ):
+            app.state.identity_service = IdentityService(
+                SupabaseAuthProvider(
+                    auth_url=resolved_settings.supabase_auth_url,
+                    anon_key=resolved_settings.supabase_anon_key.get_secret_value(),
+                    service_role_key=(
+                        resolved_settings.supabase_service_role_key.get_secret_value()
+                        if resolved_settings.supabase_service_role_key is not None
+                        else None
+                    ),
+                ),
+                default_tenant_id=resolved_settings.default_tenant_id,
+                audit_service=app.state.audit_service,
+            )
         app.state.rate_limit_service = RateLimitService(
             app.state.database_manager, resolved_settings
         )
@@ -241,6 +261,9 @@ def create_app(
                     await app.state.observability.close()
                     app.state.observability = None
                 finally:
+                    if app.state.identity_service is not None:
+                        await app.state.identity_service.close()
+                    app.state.identity_service = None
                     await app.state.auth_service.close()
                     app.state.auth_service = None
                     await app.state.database_manager.close()
@@ -276,6 +299,7 @@ def create_app(
     app.state.ask_service = None
     app.state.agentic_ask_service = None
     app.state.auth_service = None
+    app.state.identity_service = None
     app.state.memory_service = None
     app.state.audit_service = None
     app.state.rate_limit_service = None

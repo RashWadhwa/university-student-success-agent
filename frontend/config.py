@@ -10,6 +10,7 @@ class FrontendConfig:
     api_base_url: str
     request_timeout_seconds: float
     max_upload_bytes: int = 10 * 1024 * 1024
+    enable_demo_auth: bool = False
 
     @classmethod
     def from_environment(cls) -> "FrontendConfig":
@@ -31,8 +32,10 @@ class FrontendConfig:
         max_upload_bytes = int(os.getenv("FRONTEND_MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
         if not 1024 <= max_upload_bytes <= 100 * 1024 * 1024:
             raise ValueError("FRONTEND_MAX_UPLOAD_BYTES is outside the allowed range")
+        enable_demo_auth = os.getenv("ENABLE_DEMO_AUTH", "false").strip().lower() == "true"
         return cls(
             api_base_url=base_url,
             request_timeout_seconds=timeout,
             max_upload_bytes=max_upload_bytes,
+            enable_demo_auth=enable_demo_auth,
         )

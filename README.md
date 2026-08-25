@@ -952,8 +952,29 @@ user metadata and request-body `user_id` values are never trusted. `student`, `s
 and `admin` map to explicit capabilities enforced as FastAPI dependencies.
 
 Local identity is available only with the explicit `AUTH_MODE=local` setting and is
-rejected by production configuration validation. Streamlit may hold a short-lived user
-access token in its in-memory session, but receives no Supabase service-role/admin key.
+rejected by production configuration validation. Streamlit holds only a short-lived
+user access/refresh token pair in its server-side session state — never a service-role
+key, database credential, or model-provider secret.
+
+```mermaid
+flowchart LR
+    U[User] --> S[Streamlit]
+    S --> A[FastAPI]
+    A --> SA[Identity provider Auth]
+    A --> P[(PostgreSQL)]
+    P --> R[RLS]
+    A --> APP[Application services]
+```
+
+```text
+JWT
+ ↓
+authenticated user
+ ↓
+trusted application role (app_metadata.app_role)
+ ↓
+FastAPI capabilities + PostgreSQL RLS
+```
 
 | Capability | Student | Staff | Admin |
 |---|:---:|:---:|:---:|
@@ -962,6 +983,30 @@ access token in its in-memory session, but receives no Supabase service-role/adm
 | Document management | no | yes | yes |
 | System status and tenant audit | no | yes | yes |
 | Evaluation runs | no | no | yes |
+
+### Registration, session lifecycle, and password recovery
+
+`IdentityService` (`backend/auth/identity_service.py`) adds token *issuance* — the
+flows JWKS verification alone cannot provide — via `SupabaseAuthProvider`
+(`backend/auth/supabase_provider.py`), a dependency-free REST client with no
+`supabase`/`gotrue` SDK. Endpoints under `/api/v1/auth`:
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /auth/register` | Creates an account. Always assigns `app_role=student` server-side via the admin API; the request body has no role field at all, so client-supplied role escalation is structurally impossible. |
+| `POST /auth/login` | Password sign-in; returns an application-owned session (never the raw provider response). |
+| `POST /auth/demo-login` | `{"demo_role": "student"\|"staff"\|"admin"}` — signs in a pre-provisioned demo identity via the same real login path. The demo password is read from server-side config and never reaches the request body, the frontend, or a log line. Returns `404` unless `ENABLE_DEMO_AUTH=true`, which is itself hard-rejected by `Settings` when `ENVIRONMENT=production`. |
+| `POST /auth/refresh` | Exchanges a refresh token for a new session. |
+| `POST /auth/logout` | Best-effort provider-side revoke; always clears cleanly from the caller's perspective. |
+| `POST /auth/forgot-password` | Always returns the same generic message regardless of whether the account exists (anti-enumeration), whether or not the underlying email send succeeded. |
+| `POST /auth/reset-password` | Takes the `token_hash` from the emailed recovery link's query string (not the URL fragment — the provider's email template is configured to use a token-hash link specifically so a server-rendered Streamlit page can read it), exchanges it server-side, then updates the password. |
+| `GET /auth/me` | Unchanged — reflects only the validated token's role/tenant/capabilities. |
+
+Demo identities (`scripts/seed_demo_users.py`) are real Supabase users with real
+`app_metadata` roles, provisioned idempotently via the admin API — never a
+`st.session_state.role` switch. The script refuses to run when
+`ENVIRONMENT=production`, never prints passwords or tokens, and is never invoked
+automatically at application startup.
 
 ## RLS and private-data flow
 
@@ -1106,6 +1151,30 @@ $env:DATABASE_URL = $env:TEST_DATABASE_URL
 alembic upgrade head
 pytest -m integration -q
 ```
+
+### Browser end-to-end tests (Playwright)
+
+`tests/e2e` covers the authentication UI against a real, temporarily-launched FastAPI
++ Streamlit pair and the project's real identity provider — the login gate, invalid
+credentials, registration (including that no role field exists), forgot-password's
+generic response, sign-out, single-navigation-surface regression, and student vs. admin
+page visibility. Each test that needs a signed-in identity creates its own throwaway
+user via the admin API and deletes it in teardown; nothing depends on demo accounts
+existing. Excluded from every default `pytest` run (see the `e2e` marker) so normal
+local/CI runs never launch Chromium:
+
+```powershell
+pip install -e ".[e2e]"
+playwright install chromium
+pytest -m e2e tests/e2e --no-cov
+```
+
+Requires `SUPABASE_AUTH_URL`/`SUPABASE_ANON_KEY`/`SUPABASE_SERVICE_ROLE_KEY` in `.env`
+(the same project the app already uses) — install and run this suite as a development/CI
+step only, never bundled into the production runtime image. `pytest-rerunfailures` is
+available (`--reruns 2 --reruns-delay 2`) as cheap CI insurance against real-network
+timing variance against a live external identity provider, but is not required — the
+suite passes deterministically without it.
 
 ## Current limitations and next-stage readiness
 
