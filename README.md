@@ -1061,11 +1061,15 @@ carry nosniff, referrer, permissions, CSP, and production HSTS headers.
 
 ## Production deployment and operations
 
-`render.yaml` defines two non-root Docker web services. FastAPI runs Alembic once with
+`render.yaml` defines two non-root Docker web services, each built from its own
+Dockerfile (`Dockerfile` for FastAPI, `Dockerfile.frontend` for Streamlit) so the two
+services can never share a container command by accident. FastAPI runs Alembic once with
 `alembic upgrade head` in Render's pre-deploy phase, then starts Uvicorn without reload.
 Streamlit receives only the private FastAPI host/port and safe UI timeouts. Render uses
 `/health` for process liveness; `/ready` remains the operator-visible database/provider
-readiness probe and does not control restarts.
+readiness probe and does not control restarts. Both services are live on Render today,
+running on the Free plan (each spins down after inactivity, adding cold-start latency —
+upgrade to a paid plan before any real demo or evaluation window).
 
 Runtime database access remains SQLAlchemy → `DATABASE_URL` → Supabase PostgreSQL and
 pgvector. Supabase management access tokens/project references are deployment tooling,
