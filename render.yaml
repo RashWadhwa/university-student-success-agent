@@ -8,7 +8,7 @@ services:
     dockerCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
     preDeployCommand: alembic upgrade head
     healthCheckPath: /health
-    maxShutdownDelaySeconds: 30
+    
     disk:
       name: policy-documents
       mountPath: /app/data/documents
