@@ -60,7 +60,8 @@ LangChain, external vector database, or search cluster.
 ├── .gitignore                # Local secrets, caches, storage, and build exclusions
 ├── alembic.ini               # Alembic configuration
 ├── docker-compose.yml        # Local API, frontend, migration, and database stack
-├── Dockerfile                # Application container image
+├── Dockerfile                # FastAPI container image
+├── Dockerfile.frontend       # Streamlit container image
 ├── render.yaml               # Separate Render API/UI services and release migration
 ├── pyproject.toml            # Package, tooling, and test configuration
 ├── requirements.txt          # Runtime dependency list
@@ -208,7 +209,8 @@ questions, answers, evidence, prompts, rationales, secrets, or student data.
 ## Deployment / infrastructure structure
 
 ```text
-Dockerfile                     # Shared FastAPI/Streamlit application image
+Dockerfile                     # FastAPI application image
+Dockerfile.frontend            # Streamlit application image (separate CMD/health check)
 docker-compose.yml             # Local PostgreSQL, migrations, API, and frontend
 render.yaml                    # Production Blueprint: release migration + two services
 .github/workflows/ci.yml       # Tests, scans, migrations, and image validation

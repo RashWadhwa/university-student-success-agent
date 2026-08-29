@@ -1,8 +1,46 @@
 # Render and Supabase deployment
 
-`render.yaml` creates separate FastAPI and Streamlit web services. The API owns every
-secret and uses SQLAlchemy with `DATABASE_URL` to reach Supabase PostgreSQL/pgvector.
-The UI receives only FastAPI's private host/port and safe timeout/upload settings.
+`render.yaml` creates separate FastAPI and Streamlit web services, each built from its
+own Dockerfile. The API owns every secret and uses SQLAlchemy with `DATABASE_URL` to
+reach Supabase PostgreSQL/pgvector. The UI receives only FastAPI's private host/port and
+safe timeout/upload settings.
+
+## Two Dockerfiles, one repository
+
+| Service | Dockerfile | Start command | Health check path |
+|---|---|---|---|
+| `student-success-api` | `./Dockerfile` | `uvicorn backend.main:app --host 0.0.0.0 --port $PORT` | `/health` |
+| `student-success-frontend` | `./Dockerfile.frontend` | `streamlit run frontend/app.py --server.address=0.0.0.0 --server.port=$PORT --server.headless=true --browser.gatherUsageStats=false` | `/_stcore/health` |
+
+Both Dockerfiles share the identical base image, dependency-install strategy
+(`python -m pip install .`, single authoritative `pyproject.toml`), and non-root user
+setup — `Dockerfile.frontend` exists only because Render's manually-created (non-Blueprint)
+web services run a Dockerfile's own `CMD` as-is, with no per-service command override
+field the way `render.yaml`'s `dockerCommand` provides. Both services building from a
+single shared `Dockerfile` with different intended commands is what caused the frontend
+service to serve FastAPI's Uvicorn output instead of Streamlit when created manually
+through the dashboard.
+
+`$PORT` is Render-assigned per deploy and cannot be hard-coded. `Dockerfile.frontend`'s
+`CMD` is written in **shell form** (`CMD streamlit run ... --server.port=$PORT ...`,
+no JSON-array brackets) specifically so the container's shell expands `$PORT` at
+startup — exec-form `CMD ["streamlit", ...]` never invokes a shell, so `$PORT` would be
+passed through literally as the four characters `$PORT` and Streamlit would fail to bind.
+
+### Manual (non-Blueprint) Render dashboard settings for the frontend service
+
+If creating/fixing the frontend service directly in the dashboard rather than syncing
+`render.yaml`:
+
+- **Dockerfile Path**: `./Dockerfile.frontend`
+- **Docker Build Context Directory**: `.` (repository root — both Dockerfiles need the
+  full repo, not just `frontend/`)
+- **Health Check Path**: `/_stcore/health`
+- Leave any "Docker Command" field blank — `Dockerfile.frontend`'s own `CMD` already
+  starts Streamlit correctly; do not re-add an exec-form override there.
+- Environment variables: only `FASTAPI_BASE_URL` (the backend service's URL),
+  `FRONTEND_REQUEST_TIMEOUT_SECONDS`, `FRONTEND_MAX_UPLOAD_BYTES`, and optionally
+  `ENABLE_DEMO_AUTH`. No database, Supabase, LLM, or Langfuse credentials belong here.
 
 ## One-time setup
 

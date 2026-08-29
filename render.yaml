@@ -67,9 +67,8 @@ services:
     name: student-success-frontend
     runtime: docker
     plan: starter
-    dockerfilePath: ./Dockerfile
+    dockerfilePath: ./Dockerfile.frontend
     dockerContext: .
-    dockerCommand: streamlit run frontend/app.py --server.address=0.0.0.0 --server.port=$PORT --server.headless=true --browser.gatherUsageStats=false
     healthCheckPath: /_stcore/health
     maxShutdownDelaySeconds: 30
     envVars:
