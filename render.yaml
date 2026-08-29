@@ -28,6 +28,12 @@ services:
         sync: false
       - key: SUPABASE_JWT_AUDIENCE
         value: authenticated
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: ENABLE_DEMO_AUTH
+        value: "false"
       - key: DATABASE_URL
         sync: false
       - key: CORS_ORIGINS

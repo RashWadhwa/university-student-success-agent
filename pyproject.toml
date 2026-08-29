@@ -50,7 +50,7 @@ include = ["backend*", "frontend*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "-ra --strict-markers -m \"not e2e\" --cov=backend --cov-report=term-missing"
+addopts = "-ra --strict-markers --ignore=tests/e2e --cov=backend --cov-report=term-missing"
 markers = [
     "integration: requires local PostgreSQL with the pgvector extension",
     "e2e: browser end-to-end tests requiring Playwright/Chromium and a running backend+frontend (excluded by default; run with `pytest -m e2e --no-cov`)",
