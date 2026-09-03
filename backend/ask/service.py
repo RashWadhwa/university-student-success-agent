@@ -178,7 +178,10 @@ class AskService:
         except (LLMError, TimeoutError) as exc:
             logger.warning(
                 "ask_generation_failed",
-                extra={"error_type": type(exc).__name__},
+                extra={
+                    "error_type": type(exc).__name__,
+                    "provider_error_type": getattr(exc, "provider_error_type", "provider_error"),
+                },
             )
             return self._complete(
                 self._fallback(
@@ -211,7 +214,10 @@ class AskService:
         if not verification.valid:
             logger.info(
                 "ask_escalation_triggered",
-                extra={"reason": "citation_verification_failed"},
+                extra={
+                    "reason": "citation_verification_failed",
+                    "provider_error_type": "verifier_rejected",
+                },
             )
             return self._complete(
                 self._fallback(

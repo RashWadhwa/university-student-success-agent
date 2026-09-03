@@ -12,6 +12,7 @@ from backend.ask.service import AskService
 from backend.ask.types import AskOutcome, Confidence
 from backend.llm.errors import (
     LLMConfigurationError,
+    LLMIncompleteResponseError,
     LLMRateLimitError,
     LLMResponseError,
     LLMTimeoutError,
@@ -371,6 +372,7 @@ async def test_individual_approval_request_forces_low_confidence_escalation() ->
         LLMRateLimitError(),
         LLMConfigurationError(),
         LLMResponseError(),
+        LLMIncompleteResponseError(),
     ],
 )
 async def test_provider_failures_return_structured_unavailable_fallback(
@@ -381,6 +383,26 @@ async def test_provider_failures_return_structured_unavailable_fallback(
     assert result.outcome is AskOutcome.TEMPORARILY_UNAVAILABLE
     assert result.requires_human_support is True
     assert "temporarily unavailable" in (result.human_support_reason or "")
+
+
+@pytest.mark.asyncio
+async def test_generation_failure_logs_safe_provider_error_classification(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The generic fallback message must not collapse away *why* generation
+
+    failed — ops need a safe, fixed-vocabulary classification without
+    reproducing the failure manually.
+    """
+
+    with caplog.at_level("WARNING", logger="backend.ask.service"):
+        await ask(
+            service([retrieved("chunk-1")], provider=FailingProvider(LLMIncompleteResponseError()))
+        )
+
+    record = next(r for r in caplog.records if r.message == "ask_generation_failed")
+    assert record.error_type == "LLMIncompleteResponseError"
+    assert record.provider_error_type == "incomplete_response"
 
 
 @pytest.mark.asyncio

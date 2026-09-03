@@ -228,7 +228,7 @@ class Settings(BaseSettings):
         le=10,
     )
     llm_max_output_tokens: int = Field(
-        default=1200,
+        default=3000,
         validation_alias="LLM_MAX_OUTPUT_TOKENS",
         ge=64,
         le=100_000,

@@ -20,6 +20,7 @@ from backend.llm.base import (
 from backend.llm.errors import (
     LLMAuthenticationError,
     LLMConfigurationError,
+    LLMIncompleteResponseError,
     LLMRateLimitError,
     LLMRequestError,
     LLMResponseError,
@@ -28,6 +29,14 @@ from backend.llm.errors import (
 )
 
 logger = logging.getLogger(__name__)
+
+# GPT-5/o-series "reasoning" models spend part of max_output_tokens on hidden
+# reasoning before emitting visible output. Without an explicit, low effort
+# level, a moderately sized grounded-answer prompt can exhaust the entire
+# budget on reasoning alone and return an empty, incomplete response — this
+# is the actual generation-path failure mode this constant addresses.
+_REASONING_MODEL_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+_LOW_REASONING_EFFORT = "low"
 
 
 class OpenAIProvider(LLMProvider):
@@ -137,6 +146,14 @@ class OpenAIProvider(LLMProvider):
 
         try:
             response = await self._client.responses.parse(**parameters)
+        except Exception as exc:
+            raise self._translate_exception(exc) from exc
+
+        if getattr(response, "status", None) == "incomplete":
+            reason = getattr(getattr(response, "incomplete_details", None), "reason", None)
+            raise LLMIncompleteResponseError(details={"reason": reason} if reason else None)
+
+        try:
             parsed = getattr(response, "output_parsed", None)
             if isinstance(parsed, response_model):
                 output = parsed
@@ -146,8 +163,6 @@ class OpenAIProvider(LLMProvider):
             raise LLMResponseError(
                 details={"reason": "Structured output validation failed."}
             ) from exc
-        except Exception as exc:
-            raise self._translate_exception(exc) from exc
 
         return LLMResult(
             output=output,
@@ -223,6 +238,12 @@ class OpenAIProvider(LLMProvider):
         }
         if options.temperature is not None:
             parameters["temperature"] = options.temperature
+        if self.model.startswith(_REASONING_MODEL_PREFIXES):
+            # Grounded extraction from provided evidence does not need deep,
+            # multi-step reasoning; without this, reasoning tokens alone can
+            # consume the whole max_output_tokens budget (see
+            # LLMIncompleteResponseError) before any visible output is written.
+            parameters["reasoning"] = {"effort": _LOW_REASONING_EFFORT}
 
         extra_headers = self._request_headers()
         if extra_headers:
@@ -256,33 +277,47 @@ class OpenAIProvider(LLMProvider):
         class_names = {base.__name__ for base in type(exc).__mro__}
         provider_request_id = getattr(exc, "request_id", None)
         details = {"provider_request_id": provider_request_id} if provider_request_id else None
+        # OpenAI's own machine-readable error code (e.g. "insufficient_quota",
+        # "model_not_found") — a small fixed vocabulary from OpenAI's API
+        # schema, safe to inspect/log; never the free-text error message.
+        provider_code = getattr(exc, "code", None)
+
+        translated: Exception
+        if "APITimeoutError" in class_names or "TimeoutError" in class_names:
+            translated = LLMTimeoutError(details=details)
+        elif {"AuthenticationError", "PermissionDeniedError"} & class_names:
+            translated = LLMAuthenticationError(details=details)
+        elif "RateLimitError" in class_names:
+            translated = LLMRateLimitError(
+                details=details, quota_exceeded=provider_code == "insufficient_quota"
+            )
+        elif provider_code == "model_not_found":
+            translated = LLMRequestError(details=details, provider_error_type="model_not_found")
+        elif {"BadRequestError", "UnprocessableEntityError", "NotFoundError"} & class_names:
+            translated = LLMRequestError(details=details)
+        elif {"APIConnectionError", "InternalServerError"} & class_names:
+            translated = LLMUnavailableError(details=details)
+        else:
+            status_code = getattr(exc, "status_code", None)
+            if status_code == 429:
+                translated = LLMRateLimitError(
+                    details=details, quota_exceeded=provider_code == "insufficient_quota"
+                )
+            elif status_code in {401, 403}:
+                translated = LLMAuthenticationError(details=details)
+            elif status_code == 404:
+                translated = LLMRequestError(details=details, provider_error_type="model_not_found")
+            elif status_code in {400, 422}:
+                translated = LLMRequestError(details=details)
+            else:
+                translated = LLMUnavailableError(details=details)
 
         logger.warning(
             "OpenAI request failed",
             extra={
                 "error_type": type(exc).__name__,
+                "provider_error_type": translated.provider_error_type,
                 "provider_request_id": provider_request_id,
             },
         )
-
-        if "APITimeoutError" in class_names or "TimeoutError" in class_names:
-            return LLMTimeoutError(details=details)
-        if {"AuthenticationError", "PermissionDeniedError"} & class_names:
-            return LLMAuthenticationError(details=details)
-        if "RateLimitError" in class_names:
-            return LLMRateLimitError(details=details)
-        if {"BadRequestError", "UnprocessableEntityError"} & class_names:
-            return LLMRequestError(details=details)
-        if {"APIConnectionError", "InternalServerError"} & class_names:
-            return LLMUnavailableError(details=details)
-
-        status_code = getattr(exc, "status_code", None)
-        if status_code == 429:
-            return LLMRateLimitError(details=details)
-        if status_code in {401, 403}:
-            return LLMAuthenticationError(details=details)
-        if status_code in {400, 404, 422}:
-            return LLMRequestError(details=details)
-        if isinstance(status_code, int) and status_code >= 500:
-            return LLMUnavailableError(details=details)
-        return LLMUnavailableError(details=details)
+        return translated

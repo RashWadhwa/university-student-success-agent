@@ -9,7 +9,12 @@ from pydantic import BaseModel
 from backend.core.config import Environment, LLMProviderName, Settings
 from backend.core.context import request_id_context
 from backend.llm.base import GenerationOptions
-from backend.llm.errors import LLMRequestError, LLMTimeoutError
+from backend.llm.errors import (
+    LLMIncompleteResponseError,
+    LLMRateLimitError,
+    LLMRequestError,
+    LLMTimeoutError,
+)
 from backend.llm.providers.openai_provider import OpenAIProvider
 
 
@@ -23,6 +28,8 @@ class FakeResponses:
         self.create_kwargs: dict[str, Any] | None = None
         self.parse_kwargs: dict[str, Any] | None = None
         self.create_exception: Exception | None = None
+        self.parse_exception: Exception | None = None
+        self.parse_result: Any | None = None
 
     async def create(self, **kwargs: Any) -> Any:
         self.create_kwargs = kwargs
@@ -36,7 +43,12 @@ class FakeResponses:
 
     async def parse(self, **kwargs: Any) -> Any:
         self.parse_kwargs = kwargs
+        if self.parse_exception is not None:
+            raise self.parse_exception
+        if self.parse_result is not None:
+            return self.parse_result
         return SimpleNamespace(
+            status="completed",
             output_parsed=SampleOutput(answer="grounded", confidence=0.9),
             usage=SimpleNamespace(input_tokens=20, output_tokens=8, total_tokens=28),
             _request_id="req_structured_123",
@@ -179,3 +191,121 @@ async def test_close_releases_client(settings: Settings) -> None:
     await provider.close()
 
     assert client.closed is True
+
+
+@pytest.mark.asyncio
+async def test_reasoning_capable_model_gets_low_effort_reasoning_param(
+    settings: Settings,
+) -> None:
+    """gpt-5/o-series models must not default to spending the whole output
+
+    budget on hidden reasoning tokens (see LLMIncompleteResponseError).
+    """
+
+    reasoning_settings = settings.model_copy(update={"openai_model": "gpt-5-mini"})
+    client = FakeClient()
+    provider = OpenAIProvider(reasoning_settings, client=client)
+
+    await provider.generate_structured(
+        system_prompt="Return a structured answer.",
+        user_prompt="Analyse this case.",
+        response_model=SampleOutput,
+    )
+
+    assert client.responses.parse_kwargs["reasoning"] == {"effort": "low"}
+
+
+@pytest.mark.asyncio
+async def test_non_reasoning_model_does_not_get_reasoning_param(settings: Settings) -> None:
+    client = FakeClient()
+    provider = OpenAIProvider(settings, client=client)
+
+    await provider.generate_structured(
+        system_prompt="Return a structured answer.",
+        user_prompt="Analyse this case.",
+        response_model=SampleOutput,
+    )
+
+    assert "reasoning" not in client.responses.parse_kwargs
+
+
+@pytest.mark.asyncio
+async def test_incomplete_response_raises_distinct_error_not_generic_validation_failure(
+    settings: Settings,
+) -> None:
+    """A reasoning model that exhausts max_output_tokens before answering must
+
+    be classified as incomplete_response, not a confusing schema-validation
+    failure — the fix differs (token budget/effort) from a genuine invalid
+    structured output.
+    """
+
+    client = FakeClient()
+    client.responses.parse_result = SimpleNamespace(
+        status="incomplete",
+        incomplete_details=SimpleNamespace(reason="max_output_tokens"),
+        output_parsed=None,
+        usage=SimpleNamespace(input_tokens=20, output_tokens=500, total_tokens=520),
+        _request_id="req_incomplete_123",
+    )
+    provider = OpenAIProvider(settings, client=client)
+
+    with pytest.raises(LLMIncompleteResponseError) as exc_info:
+        await provider.generate_structured(
+            system_prompt="Return a structured answer.",
+            user_prompt="Analyse this case.",
+            response_model=SampleOutput,
+        )
+
+    assert exc_info.value.provider_error_type == "incomplete_response"
+    assert exc_info.value.details == {"reason": "max_output_tokens"}
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_without_quota_code_is_classified_as_rate_limit(
+    settings: Settings,
+) -> None:
+    class RateLimitError(Exception):
+        code = "rate_limit_exceeded"
+
+    client = FakeClient()
+    client.responses.create_exception = RateLimitError("slow down")
+    provider = OpenAIProvider(settings, client=client)
+
+    with pytest.raises(LLMRateLimitError) as exc_info:
+        await provider.generate_text(system_prompt="system", user_prompt="user")
+
+    assert exc_info.value.provider_error_type == "rate_limit"
+
+
+@pytest.mark.asyncio
+async def test_insufficient_quota_is_classified_distinctly_from_rate_limit(
+    settings: Settings,
+) -> None:
+    class RateLimitError(Exception):
+        code = "insufficient_quota"
+
+    client = FakeClient()
+    client.responses.create_exception = RateLimitError("no credit")
+    provider = OpenAIProvider(settings, client=client)
+
+    with pytest.raises(LLMRateLimitError) as exc_info:
+        await provider.generate_text(system_prompt="system", user_prompt="user")
+
+    assert exc_info.value.provider_error_type == "quota"
+
+
+@pytest.mark.asyncio
+async def test_model_not_found_is_classified_as_model_access_issue(settings: Settings) -> None:
+    class NotFoundError(Exception):
+        code = "model_not_found"
+        status_code = 404
+
+    client = FakeClient()
+    client.responses.create_exception = NotFoundError("no such model")
+    provider = OpenAIProvider(settings, client=client)
+
+    with pytest.raises(LLMRequestError) as exc_info:
+        await provider.generate_text(system_prompt="system", user_prompt="user")
+
+    assert exc_info.value.provider_error_type == "model_not_found"
