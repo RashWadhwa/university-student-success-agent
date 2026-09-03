@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 # budget on reasoning alone and return an empty, incomplete response — this
 # is the actual generation-path failure mode this constant addresses.
 _REASONING_MODEL_PREFIXES = ("gpt-5", "o1", "o3", "o4")
-_LOW_REASONING_EFFORT = "low"
+_LOW_REASONING_EFFORT = "medium"
 
 
 class OpenAIProvider(LLMProvider):
