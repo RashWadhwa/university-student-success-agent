@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 # budget on reasoning alone and return an empty, incomplete response — this
 # is the actual generation-path failure mode this constant addresses.
 _REASONING_MODEL_PREFIXES = ("gpt-5", "o1", "o3", "o4")
-_LOW_REASONING_EFFORT = "medium"
+_LOW_REASONING_EFFORT = "low"
 
 
 class OpenAIProvider(LLMProvider):
@@ -146,6 +146,19 @@ class OpenAIProvider(LLMProvider):
 
         try:
             response = await self._client.responses.parse(**parameters)
+        except ValidationError as exc:
+            # The SDK's own .parse() eagerly parses the (possibly truncated)
+            # response text internally, before ever returning an object we
+            # can inspect for status="incomplete" — so a truncated response
+            # can surface here as a raw JSON-parse failure instead. Only
+            # "json_invalid" (malformed/incomplete JSON) means truncation;
+            # a structurally valid-but-schema-mismatched response is a
+            # genuine structured_output_invalid, not incomplete_response.
+            if any(error["type"] == "json_invalid" for error in exc.errors()):
+                raise LLMIncompleteResponseError(details={"reason": "truncated_json"}) from exc
+            raise LLMResponseError(
+                details={"reason": "Structured output validation failed."}
+            ) from exc
         except Exception as exc:
             raise self._translate_exception(exc) from exc
 

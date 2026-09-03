@@ -21,20 +21,24 @@ def test_pdf_to_grounded_ask_api_with_postgres_and_mock_llm(
 ) -> None:
     marker = f"policyref{uuid4().hex}"
     generated = {
-        "answer": (
+        "summary": (
             "The policy indicates that a student who missed an assessment because of illness "
             "may use the mitigating circumstances procedure."
         ),
-        "recommended_actions": [
+        "policy_facts": [
             {
-                "priority": 1,
-                "action": "Review the published mitigating circumstances procedure.",
-                "reason": "The indexed policy identifies this as the relevant route.",
-                "basis": "policy",
+                "fact": "The indexed policy identifies the mitigating circumstances route.",
                 "citation_ids": ["E1"],
             }
         ],
-        "citations": [{"citation_id": "E1"}],
+        "actions": [
+            {
+                "priority": 1,
+                "action": "Review the published mitigating circumstances procedure.",
+                "reason": "This is the relevant published route.",
+                "citation_ids": [],
+            }
+        ],
         "limitations": [],
         "confidence": "high",
         "requires_human_support": False,

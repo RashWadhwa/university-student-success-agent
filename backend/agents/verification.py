@@ -46,9 +46,9 @@ class WorkflowVerifier:
         if not cited:
             return VerificationOutput(valid=True, citation_ids=[])
         synthetic = GroundedAnswerOutput(
-            answer=" ".join(texts),
-            recommended_actions=[],
-            citations=[{"citation_id": citation_id} for citation_id in dict.fromkeys(cited)],
+            summary=" ".join(texts),
+            policy_facts=[{"fact": " ".join(texts), "citation_ids": list(dict.fromkeys(cited))}],
+            actions=[],
             limitations=list(analysis.uncertainties),
             confidence="low",
             requires_human_support=bool(analysis.uncertainties or analysis.conflicts),
@@ -90,19 +90,24 @@ class WorkflowVerifier:
                 valid=False,
                 failure_categories=["support_used_unanalysed_evidence"],
             )
+        # support.actions still carries the specialist's own self-declared
+        # `basis`, but it is deliberately not read here: classification is
+        # the shared verifier's job, derived from content alone, exactly as
+        # for the baseline contract. This also means every action's own
+        # citation_ids are validated uniformly below, regardless of basis —
+        # no separate defensive check is needed for either label.
         generated = GroundedAnswerOutput(
-            answer=support.answer,
-            recommended_actions=[
+            summary=support.answer,
+            policy_facts=[{"fact": support.answer, "citation_ids": support.citation_ids}],
+            actions=[
                 {
                     "priority": item.priority,
                     "action": item.action,
                     "reason": item.reason,
-                    "basis": item.basis,
                     "citation_ids": item.citation_ids,
                 }
                 for item in support.actions
             ],
-            citations=[{"citation_id": item} for item in support.citation_ids],
             limitations=support.limitations,
             confidence="low",
             requires_human_support=support.requires_human_support,

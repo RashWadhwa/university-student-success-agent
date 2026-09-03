@@ -1,5 +1,6 @@
 """Thin HTTP adapter for the grounded ask workflow."""
 
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
@@ -23,6 +24,28 @@ from backend.schemas.agentic import AgenticAskResponse
 from backend.schemas.ask import AskRequest, AskResponse
 
 router = APIRouter(tags=["ask"])
+logger = logging.getLogger(__name__)
+
+
+def _log_authenticated_request(principal: Principal, *, workflow_mode: str) -> None:
+    """Safe boundary log: proves auth/capability passed without identity data.
+
+    Reaching this call is itself proof the request passed both
+    get_current_principal and the router-level require_capability check —
+    if either had failed, a 401/403 would already have been raised before
+    the route body ran. Never logs tokens, emails, user IDs, or raw claims.
+    """
+
+    logger.info(
+        "ask_route_authenticated",
+        extra={
+            "authenticated": True,
+            "role": principal.role.value,
+            "capability_check": "passed",
+            "workflow_mode": workflow_mode,
+            "request_id": get_request_id(),
+        },
+    )
 
 
 @router.post("/ask", response_model=AskResponse, summary="Ask a grounded policy question")
@@ -34,6 +57,7 @@ async def ask(
     principal: Annotated[Principal, Depends(get_current_principal)],
     audit: Annotated[AuditService, Depends(get_audit_service)],
 ) -> AskResponse:
+    _log_authenticated_request(principal, workflow_mode="baseline")
     await record_ask_started(
         observability,
         request_id=get_request_id(),
@@ -74,6 +98,7 @@ async def ask_agentic(
     principal: Annotated[Principal, Depends(get_current_principal)],
     audit: Annotated[AuditService, Depends(get_audit_service)],
 ) -> AgenticAskResponse:
+    _log_authenticated_request(principal, workflow_mode="agentic")
     await record_ask_started(
         observability,
         request_id=get_request_id(),

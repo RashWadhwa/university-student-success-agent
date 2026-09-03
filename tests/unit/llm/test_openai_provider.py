@@ -13,6 +13,7 @@ from backend.llm.errors import (
     LLMIncompleteResponseError,
     LLMRateLimitError,
     LLMRequestError,
+    LLMResponseError,
     LLMTimeoutError,
 )
 from backend.llm.providers.openai_provider import OpenAIProvider
@@ -293,6 +294,68 @@ async def test_insufficient_quota_is_classified_distinctly_from_rate_limit(
         await provider.generate_text(system_prompt="system", user_prompt="user")
 
     assert exc_info.value.provider_error_type == "quota"
+
+
+@pytest.mark.asyncio
+async def test_truncated_json_from_sdk_internal_parse_is_incomplete_not_unavailable(
+    settings: Settings,
+) -> None:
+    """The OpenAI SDK's .parse() eagerly parses response text internally and
+
+    raises a raw pydantic ValidationError for truncated JSON *before* ever
+    returning an object we could otherwise check status="incomplete" on.
+    This must still be classified as incomplete_response, not fall through
+    to a generic, misleading "provider unavailable".
+    """
+
+    try:
+        SampleOutput.model_validate_json('{"answer": "partial output that never')
+        pytest.fail("expected a ValidationError")
+    except Exception as exc:
+        truncated_json_error = exc
+
+    client = FakeClient()
+    client.responses.parse_exception = truncated_json_error
+    provider = OpenAIProvider(settings, client=client)
+
+    with pytest.raises(LLMIncompleteResponseError) as exc_info:
+        await provider.generate_structured(
+            system_prompt="Return a structured answer.",
+            user_prompt="Analyse this case.",
+            response_model=SampleOutput,
+        )
+
+    assert exc_info.value.provider_error_type == "incomplete_response"
+
+
+@pytest.mark.asyncio
+async def test_complete_but_schema_mismatched_json_is_structured_output_invalid(
+    settings: Settings,
+) -> None:
+    """A syntactically complete JSON response that just doesn't match the
+
+    schema is a genuinely different failure from truncation and must not be
+    misclassified as incomplete_response.
+    """
+
+    try:
+        SampleOutput.model_validate_json('{"answer": "complete but missing a field"}')
+        pytest.fail("expected a ValidationError")
+    except Exception as exc:
+        schema_mismatch_error = exc
+
+    client = FakeClient()
+    client.responses.parse_exception = schema_mismatch_error
+    provider = OpenAIProvider(settings, client=client)
+
+    with pytest.raises(LLMResponseError) as exc_info:
+        await provider.generate_structured(
+            system_prompt="Return a structured answer.",
+            user_prompt="Analyse this case.",
+            response_model=SampleOutput,
+        )
+
+    assert exc_info.value.provider_error_type == "structured_output_invalid"
 
 
 @pytest.mark.asyncio

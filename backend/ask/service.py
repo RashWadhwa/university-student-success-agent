@@ -10,7 +10,7 @@ from urllib.parse import urlsplit, urlunsplit
 from backend.ask.errors import AskValidationError
 from backend.ask.evidence import assess_evidence
 from backend.ask.models import GroundedAnswerOutput
-from backend.ask.prompts import build_grounded_prompt
+from backend.ask.prompts import REGENERATION_INSTRUCTION, build_grounded_prompt
 from backend.ask.scope import assess_scope
 from backend.ask.types import (
     AskOutcome,
@@ -21,15 +21,64 @@ from backend.ask.types import (
     EvidenceAssessment,
     RecommendedAction,
 )
-from backend.ask.verification import verify_grounded_output
+from backend.ask.verification import (
+    ClassifiedAction,
+    classify_verification_failure,
+    is_retryable_verification_failure,
+    verify_grounded_output,
+)
 from backend.core.context import get_request_id
-from backend.llm.base import GenerationOptions, LLMProvider
+from backend.llm.base import GenerationOptions, LLMProvider, LLMResult
 from backend.llm.errors import LLMError
 from backend.rag.errors import RetrievalUnavailableError
 from backend.rag.retrieval import RetrievalService
 from backend.rag.types import SearchFilters
 
 logger = logging.getLogger(__name__)
+
+
+def _normalise_for_dedup(text: str) -> str:
+    return " ".join(text.casefold().split())
+
+
+def _is_redundant_text(candidate: str, already_shown: list[str]) -> bool:
+    """Conservative containment check; short strings are never treated as
+
+    duplicates since brief phrases naturally overlap without meaning the
+    same thing.
+    """
+
+    if len(candidate) < 20:
+        return False
+    return any(
+        candidate == shown or candidate in shown or shown in candidate for shown in already_shown
+    )
+
+
+def _drop_actions_redundant_with_facts(
+    actions: tuple[ClassifiedAction, ...],
+    fact_texts: list[str],
+) -> list[ClassifiedAction]:
+    """Deterministic, display-only deduplication.
+
+    This runs strictly after verification has already passed. It never
+    changes what is valid, never repairs an unsupported claim, and never
+    infers or transfers a citation — each kept action retains exactly the
+    citation_ids the model supplied for that action. It only removes an
+    action from the visible list when its own wording already duplicates
+    content already shown (a policy_fact, or an earlier action in this same
+    answer), so the student is not shown the same requirement twice.
+    """
+
+    shown = [_normalise_for_dedup(text) for text in fact_texts]
+    kept: list[ClassifiedAction] = []
+    for item in actions:
+        normalised = _normalise_for_dedup(item.action)
+        if _is_redundant_text(normalised, shown):
+            continue
+        shown.append(normalised)
+        kept.append(item)
+    return kept
 
 
 class AskService:
@@ -167,14 +216,19 @@ class AskService:
             "ask_generation_started",
             extra={"evidence_count": len(assessment.evidence)},
         )
-        try:
+
+        async def _generate(prompt: str) -> LLMResult[GroundedAnswerOutput]:
+            nonlocal provider_calls
             provider_calls += 1
-            generated = await self.provider.generate_structured(
-                system_prompt=system_prompt,
+            return await self.provider.generate_structured(
+                system_prompt=prompt,
                 user_prompt=user_prompt,
                 response_model=GroundedAnswerOutput,
                 options=GenerationOptions(),
             )
+
+        try:
+            generated = await _generate(system_prompt)
         except (LLMError, TimeoutError) as exc:
             logger.warning(
                 "ask_generation_failed",
@@ -211,12 +265,92 @@ class AskService:
                 "citation_count": len(verification.citation_ids),
             },
         )
+
+        # A single bounded regeneration: same retrieved evidence, same user
+        # prompt, same verifier. Only failure modes the backend judges
+        # self-correctable (see RETRY_ELIGIBLE_REASON_CODES) are retried, and
+        # only once — this attaches no new provider budget beyond the
+        # existing AGENT_MAX_PROVIDER_CALLS accounting in the agentic
+        # workflow, which reads provider_calls from the result below.
+        should_retry = not verification.valid and is_retryable_verification_failure(
+            verification.reasons
+        )
+        logger.info(
+            "ask_verification_attempt",
+            extra={
+                "verification_attempt": 1,
+                "verifier_result": "passed" if verification.valid else "failed",
+                "verifier_reason": (
+                    classify_verification_failure(verification.reasons)
+                    if not verification.valid
+                    else None
+                ),
+                "regeneration_attempted": should_retry,
+            },
+        )
+        if should_retry:
+            retry_prompt = f"{system_prompt}\n\n{REGENERATION_INSTRUCTION}"
+            try:
+                generated = await _generate(retry_prompt)
+            except (LLMError, TimeoutError) as exc:
+                logger.warning(
+                    "ask_generation_failed",
+                    extra={
+                        "error_type": type(exc).__name__,
+                        "provider_error_type": getattr(
+                            exc, "provider_error_type", "provider_error"
+                        ),
+                    },
+                )
+                return self._complete(
+                    self._fallback(
+                        outcome=AskOutcome.TEMPORARILY_UNAVAILABLE,
+                        answer=(
+                            "I found relevant policy evidence but could not produce a verified "
+                            "answer right now. Please try again later or ask university staff "
+                            "for guidance."
+                        ),
+                        reason="The answer-generation service is temporarily unavailable.",
+                        request_id=request_id,
+                        retrieved_count=len(results),
+                        evidence_count=len(assessment.evidence),
+                        provider_calls=provider_calls,
+                    ),
+                    started,
+                )
+            logger.info(
+                "ask_generation_completed",
+                extra={"provider": generated.provider, "model": generated.model},
+            )
+            verification = verify_grounded_output(generated.output, assessment.evidence)
+            logger.info(
+                "ask_citation_verification_completed",
+                extra={
+                    "verified": verification.valid,
+                    "citation_count": len(verification.citation_ids),
+                },
+            )
+            logger.info(
+                "ask_verification_attempt",
+                extra={
+                    "verification_attempt": 2,
+                    "verifier_result": "passed" if verification.valid else "failed",
+                    "verifier_reason": (
+                        classify_verification_failure(verification.reasons)
+                        if not verification.valid
+                        else None
+                    ),
+                },
+            )
+
         if not verification.valid:
             logger.info(
                 "ask_escalation_triggered",
                 extra={
                     "reason": "citation_verification_failed",
                     "provider_error_type": "verifier_rejected",
+                    "verifier_result": "failed",
+                    "verifier_reason": classify_verification_failure(verification.reasons),
                 },
             )
             return self._complete(
@@ -262,20 +396,36 @@ class AskService:
                 "Older retrieved policy versions were omitted in favour of the latest "
                 "effective evidence."
             )
+        answer_text = generated.output.summary
+        policy_fact_lines = [fact.fact for fact in generated.output.policy_facts]
+        if policy_fact_lines:
+            answer_text = f"{answer_text}\n\n" + "\n".join(
+                f"- {line}" for line in policy_fact_lines
+            )
+        # Classification (policy vs. practical) already happened inside the
+        # verifier, deterministically, from content alone. This step only
+        # removes display redundancy against content already shown — it never
+        # rejects, repairs, or invents a citation; an action's citation_ids
+        # here are exactly what the model supplied for that action.
+        recommended_actions = tuple(
+            RecommendedAction(
+                priority=item.priority,
+                action=item.action,
+                reason=item.reason,
+                citation_ids=item.citation_ids,
+                kind=item.kind,
+            )
+            for item in sorted(
+                _drop_actions_redundant_with_facts(
+                    verification.classified_actions, policy_fact_lines
+                ),
+                key=lambda item: item.priority,
+            )
+        )
         result = AskResult(
             outcome=AskOutcome.ANSWERED,
-            answer=generated.output.answer,
-            recommended_actions=tuple(
-                RecommendedAction(
-                    priority=item.priority,
-                    action=item.action,
-                    reason=item.reason,
-                )
-                for item in sorted(
-                    generated.output.recommended_actions,
-                    key=lambda action: action.priority,
-                )
-            ),
+            answer=answer_text,
+            recommended_actions=recommended_actions,
             citations=tuple(
                 self.citation_for_evidence(self._evidence_by_id(assessment)[citation_id])
                 for citation_id in verification.citation_ids

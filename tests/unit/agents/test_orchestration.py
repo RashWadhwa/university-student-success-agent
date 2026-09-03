@@ -30,6 +30,7 @@ from backend.agents.verification import WorkflowVerifier
 from backend.ask.models import GroundedAnswerOutput
 from backend.ask.service import AskService
 from backend.ask.types import AskOutcome
+from backend.llm.base import LLMResult, TokenUsage
 from backend.llm.providers.mock_provider import MockLLMProvider
 from backend.rag.types import FusedRetrievalResult, RetrievalCandidate, SearchFilters
 
@@ -79,9 +80,11 @@ def retrieved() -> FusedRetrievalResult:
 
 def baseline_output() -> dict[str, Any]:
     return {
-        "answer": "The policy describes the mitigating circumstances route.",
-        "recommended_actions": [],
-        "citations": [{"citation_id": "E1"}],
+        "summary": "The policy describes the mitigating circumstances route.",
+        "policy_facts": [
+            {"fact": "The mitigating circumstances route applies.", "citation_ids": ["E1"]}
+        ],
+        "actions": [],
         "limitations": [],
         "confidence": "medium",
         "requires_human_support": False,
@@ -209,6 +212,77 @@ async def test_simple_question_delegates_to_unchanged_baseline() -> None:
     assert result.tool_calls == 0
     assert result.provider_calls == 2
     assert result.terminal_state is WorkflowStatus.COMPLETED
+
+
+class SequencedGroundedProvider(MockLLMProvider):
+    """Cycles through configured GroundedAnswerOutput responses in order;
+
+    defers to the base mock for any other schema (policy/support specialists).
+    """
+
+    def __init__(self, ground_outputs: list[dict[str, Any]]) -> None:
+        super().__init__(
+            structured_responses={
+                PolicyAnalysisOutput: policy_output(),
+                StudentSupportOutput: support_output(),
+            },
+            embedding_dimensions=8,
+        )
+        self._ground_outputs = ground_outputs
+        self.ground_calls = 0
+
+    async def generate_structured(self, **kwargs: Any) -> Any:
+        if kwargs.get("response_model") is GroundedAnswerOutput:
+            output = GroundedAnswerOutput.model_validate(self._ground_outputs[self.ground_calls])
+            self.ground_calls += 1
+            return LLMResult(
+                output=output,
+                provider=self.name,
+                model=self.model,
+                latency_ms=0.0,
+                usage=TokenUsage(),
+                provider_request_id="mock-request",
+            )
+        return await super().generate_structured(**kwargs)
+
+
+def uncited_baseline_output() -> dict[str, Any]:
+    """Retry-eligible baseline output: a policy fact with no citation.
+
+    A second, validly cited fact is kept so the top-level "cited nothing at
+    all" invariant (a separate, non-eligible reason) does not also fire.
+    """
+
+    return {
+        **baseline_output(),
+        "policy_facts": [
+            *baseline_output()["policy_facts"],
+            {
+                "fact": "Claims must be submitted using the mitigating circumstances form.",
+                "citation_ids": [],
+            },
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_baseline_retry_cannot_recursively_restart_the_agent_workflow() -> None:
+    """A retry that pushes provider_calls over budget must fail closed once —
+
+    the agentic workflow must not re-invoke baseline.answer() again to try to
+    recover, and the retry itself must stay inside the single AskService call.
+    """
+
+    provider = SequencedGroundedProvider([uncited_baseline_output(), baseline_output()])
+
+    result = await ask(
+        build_service(provider=provider, provider_limit=2),
+        "How do mitigating circumstances work?",
+    )
+
+    assert provider.ground_calls == 2  # exactly one retry, inside the one baseline call
+    assert result.result.outcome is AskOutcome.TEMPORARILY_UNAVAILABLE
+    assert result.terminal_state is WorkflowStatus.FAILED
 
 
 @pytest.mark.asyncio

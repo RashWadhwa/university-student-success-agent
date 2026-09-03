@@ -71,6 +71,8 @@ class RecommendedAction:
     priority: int
     action: str
     reason: str
+    citation_ids: tuple[str, ...] = ()
+    kind: str = "practical"
 
 
 @dataclass(frozen=True, slots=True)

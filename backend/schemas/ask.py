@@ -1,6 +1,7 @@
 """Typed request and response schemas for the grounded ask workflow."""
 
 from datetime import date
+from typing import Literal
 
 from pydantic import Field, field_validator
 
@@ -39,6 +40,8 @@ class AskRecommendedAction(StrictModel):
     priority: int = Field(ge=1)
     action: str
     reason: str
+    citation_ids: list[str] = Field(default_factory=list)
+    kind: Literal["policy", "practical"] = "practical"
 
 
 class AskCitation(StrictModel):
@@ -89,6 +92,8 @@ class AskResponse(StrictModel):
                     priority=item.priority,
                     action=item.action,
                     reason=item.reason,
+                    citation_ids=list(item.citation_ids),
+                    kind=item.kind,
                 )
                 for item in result.recommended_actions
             ],

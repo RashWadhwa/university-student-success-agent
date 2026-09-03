@@ -69,11 +69,15 @@ def render(client: StudentSuccessAPIClient) -> None:
         st.write(response.get("answer", "No answer was returned."))
         action_items = response.get("recommended_actions", [])
         if action_items:
-            st.subheader("Recommended actions")
+            st.subheader("Recommended next steps")
             for action in action_items:
+                citation_ids = action.get("citation_ids") or []
+                reference = (
+                    f"  \n*Policy reference: {', '.join(citation_ids)}*" if citation_ids else ""
+                )
                 st.markdown(
                     f"**{action.get('priority', '—')}. {action.get('action', '')}**  \n"
-                    f"{action.get('reason', '')}"
+                    f"{action.get('reason', '')}{reference}"
                 )
         summary = st.columns(3)
         summary[0].metric("Confidence", str(response.get("confidence", "unknown")).title())

@@ -13,17 +13,32 @@ Do not invent deadlines, procedures, contacts, outcomes, eligibility, or policy 
 Institution policy and sector guidance have different authority. Never present secondary
 sector guidance as the primary institution's rule; use it only as clearly labelled context.
 Cite only the supplied identifiers such as E1. Never invent document metadata.
-Mark each recommended action as policy-based or general practical guidance, and attach
-evidence IDs to every policy-based action. Distinguish policy facts from suggestions.
-If an action states or implies a requirement, deadline, eligibility rule, or procedure
-(for example: must, required, eligible, deadline, procedure requires, not permitted),
-label it policy-based and attach the supporting evidence IDs — never label content like
-this as practical guidance without a citation. Practical guidance describes general good
-practice and must not assert a specific rule, deadline, or requirement.
+
+Put every descriptive statement of what the policy says in policy_facts, each with the
+supporting evidence IDs attached. A policy_fact with no citation is invalid.
+
+List every student-facing next step in actions. For each action, attach the evidence IDs it
+relies on if it comes from the supplied policy — a form, a deadline, required evidence, a
+submission route, an eligibility condition, a mandatory process, an approval or decision
+process, or a named university office. Leave citation_ids empty only for generic advice that
+would still be reasonable even if the retrieved policy did not exist at all (for example:
+keeping a copy of what you submit, or contacting your tutor for clarification). Do not decide
+or state whether an action is "policy" or "practical" — supply only the action, a reason, and
+any citation IDs it actually relies on; the application determines the rest.
+
 Admit missing or conflicting information and recommend human support when appropriate.
 Never state that an extension, claim, reassessment, or appeal is approved or guaranteed.
 Do not diagnose medical conditions and do not provide legal advice.
 Return only the requested structured output."""
+
+REGENERATION_INSTRUCTION = """The previous draft could not be accepted because some content
+was not adequately supported by the supplied evidence — at least one action described a step
+that relies on the university's policy but had no supporting citation. Rewrite the answer
+using only the supplied evidence. For every action that mentions a form, a deadline, required
+evidence, a submission route, an eligibility condition, a mandatory process, an approval or
+decision process, or a named university office, attach the evidence IDs it relies on. Leave
+citation_ids empty only for advice that would still be reasonable even if the retrieved
+policy did not exist."""
 
 
 def build_grounded_prompt(
