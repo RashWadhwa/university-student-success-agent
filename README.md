@@ -9,7 +9,7 @@ generated only from retrieved university evidence and returned with verified
 page-level citations — the model never answers from memory alone.
 
 The application includes a production authentication boundary backed by Supabase
-Auth, capability-based authorization for student/staff/admin roles, PostgreSQL Row
+Auth, capability-based authorisation for student/staff/admin roles, PostgreSQL Row
 Level Security, consent-based semantic memory, persistent safe audit metadata, shared
 rate limits, CI security checks, and a reproducible two-service Render deployment.
 
@@ -21,6 +21,8 @@ retrieval, prompts, schemas, the portal, or evaluation code.
 Answers are informational. They do not approve applications, replace current
 university policy, diagnose health conditions, or provide legal advice. See
 [Responsible Use](#responsible-use).
+
+[Demo Link](https://youtu.be/4pi9sIyJ_7E)
 
 ## Core Architecture
 
@@ -46,7 +48,7 @@ repositories, and services. There is no Supabase client SDK, LangChain, external
 vector database, or search cluster — Supabase is used as managed Postgres and as the
 Auth provider, both over standard protocols (SQL and REST/JWKS).
 
-Route handlers stay thin; behavior lives in the ask, agent, document, RAG, auth,
+Route handlers stay thin; behaviour lives in the ask, agent, document, RAG, auth,
 evaluation, and observability services, with repositories owning persistence queries
 and provider adapters kept replaceable. See [Repository Structure](#repository-structure)
 for the full module layout.
@@ -134,7 +136,7 @@ checksums, per-document chunk indexes, and a GIN full-text index over chunk cont
 adds source classification; adds the authentication/RLS/audit schema described in
 [Authentication and Role-Based Access](#authentication-and-role-based-access) and
 [Database Security and Row Level Security](#database-security-and-row-level-security);
-and enables Row Level Security on the remaining infrastructure tables.
+and enables Row-Level Security on the remaining infrastructure tables.
 
 No HNSW or IVFFlat index is created. Exact cosine search gives deterministic,
 high-quality results for the current corpus size without ANN tuning or index training;
@@ -149,7 +151,7 @@ through `DATABASE_URL` and SQLAlchemy, never a Supabase client SDK:
    the **Session Pooler** connection (IPv4-friendly, suited to a long-lived API
    service); direct connection is also supported where IPv6 is available.
 2. Replace its scheme with `postgresql+asyncpg://` (plain `postgresql://` is also
-   accepted and normalized), URL-encode special password characters, and add an SSL
+   accepted and normalised), URL-encode special password characters, and add an SSL
    option such as `?sslmode=require` according to the project's SSL policy.
 3. Put the value in local/hosted `DATABASE_URL`; never commit it.
 4. Run `alembic upgrade head` with that environment variable configured — this also
@@ -179,7 +181,7 @@ Upload validation rejects unsafe, empty, oversized, encrypted, corrupt, and imag
 PDFs. Indexing is atomic, and hybrid retrieval returns only bounded, citation-ready
 evidence with preserved document and page metadata:
 
-- exact pgvector cosine search with scores normalized to `[0, 1]`
+- exact pgvector cosine search with scores normalised to `[0, 1]`
 - PostgreSQL English full-text search for exact policy terminology
 - typed metadata filters without caller-controlled SQL
 - deterministic Reciprocal Rank Fusion (RRF), deduplication, and source attribution
@@ -206,12 +208,12 @@ evidence threshold, optional freshness preference, and typed filters:
 ```
 
 Results contain chunk/document IDs, content, page, section, title, policy metadata,
-normalized score, evidence score, source-specific scores, and whether semantic,
+normalised score, evidence score, source-specific scores, and whether semantic,
 keyword, or both retrieval paths contributed.
 
-Semantic scores normalize cosine distance with `1 - distance / 2`, clamped to `[0, 1]`.
-Keyword rank is normalized with `rank / (rank + 1)`. These incomparable scores are not
-summed: RRF combines their rank positions, and the final RRF score is normalized
+Semantic scores normalise cosine distance with `1 - distance / 2`, clamped to `[0, 1]`.
+Keyword rank is normalised with `rank / (rank + 1)`. These incomparable scores are not
+summed: RRF combines their rank positions, and the final RRF score is normalised
 relative to the best candidate. `minimum_score` applies to the strongest underlying
 evidence score. `prefer_recent` is an explicit effective-date tie-break; versions are
 never ordered lexically.
@@ -251,7 +253,7 @@ asks whether an individual extension, claim, or appeal will be approved. The ser
 recommends contact but never claims to contact staff automatically. Safe fallback
 outcomes distinguish `unsupported`, `insufficient_evidence`, `verification_failed`, and
 `temporarily_unavailable` — these are typed responses; ordinary request validation and
-unavailable initialization dependencies continue to use the existing structured error
+unavailable initialisation dependencies continue to use the existing structured error
 envelope.
 
 ### Request- and answer-level security
@@ -294,7 +296,7 @@ catalogue:
 - [Academic Appeals Policy and Procedure 2023–2026](https://www.harper-adams.ac.uk/documents/Academic-appeals-procedure.pdf)
 - [Student Engagement Policy](https://cdn.harper-adams.ac.uk/document/ki/key-info-page/Student-Engagement-Policy.pdf)
 
-These cover mitigating circumstances, extensions, late or missed assessment,
+These cover mitigating circumstances, extensions, late or missed assessments,
 reassessment, appeals, assessment rules, and relevant support routes. The manifest
 contains no private portal links, student records, or copied policy content — it
 records official URLs, titles, document types, version/date notes, and policy domains;
@@ -349,7 +351,7 @@ institution without receiving secrets or backend connection details.
 
 Production uses `AUTH_MODE=supabase`. FastAPI verifies each access token against the
 project's asymmetric JWKS and validates its signature, issuer, audience, expiry, issue
-time, and subject. Authorization data comes only from trusted `app_metadata`; mutable
+time, and subject. Authorisation data comes only from trusted `app_metadata`; mutable
 user metadata and request-body `user_id` values are never trusted. `student`, `staff`,
 and `admin` map to explicit capabilities enforced as FastAPI dependencies. Local
 identity is available only with the explicit `AUTH_MODE=local` setting and is rejected
@@ -412,7 +414,7 @@ Demo identities (`scripts/seed_demo_users.py`) are real Supabase users with real
 never prints passwords or tokens, and is never invoked automatically at application
 startup.
 
-## Database Security and Row Level Security
+## Database Security and Row-Level Security
 
 ```mermaid
 flowchart LR
@@ -439,7 +441,7 @@ first two tables. Private services always use `private_session()`, which starts 
 transaction, assumes that constrained role, and sets validated identity as
 transaction-local PostgreSQL settings — memory owners cannot read, update, or delete
 another user or tenant's rows, and staff/admin audit reads remain tenant-scoped. `FORCE
-ROW LEVEL SECURITY` is used only here, as defense-in-depth against the app's own
+ROW LEVEL SECURITY` is used only here, as defence-in-depth against the app's own
 connection accidentally bypassing per-row ownership if a query ever skipped
 `private_session()`.
 
@@ -453,7 +455,7 @@ project's anon key read or modify the RAG corpus, rate-limit counters, or migrat
 state directly through Supabase's REST API, completely bypassing FastAPI. Enabling RLS
 with no policies denies both roles by default; the matching `REVOKE ALL` (applied only
 where those roles actually exist, so local/CI PostgreSQL is unaffected) removes their
-raw grants as defense-in-depth. `FORCE` is deliberately not used on these four tables —
+raw grants as defence-in-depth. `FORCE` is deliberately not used on these four tables —
 the application's own role already fully bypasses RLS as their owner, so it adds no
 protection and isn't needed architecturally the way it is for `semantic_memory`/
 `audit_logs`.
